@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: MIT
+
+pragma solidity 0.6.11;
+
+import "../Dependencies/CheckContract.sol";
+import "../Interfaces/ILQTYStaking.sol";
+
+
+contract LQTYStakingScript is CheckContract {
+    ILQTYStaking immutable LQTYStaking;
+
+    constructor(address _lqtyStakingAddress) public {
+        checkContract(_lqtyStakingAddress);
+        LQTYStaking = ILQTYStaking(_lqtyStakingAddress);
+    }
+
+    function stakeDemand(uint _LQTYamount) external {
+        LQTYStaking.stakeDemand(_LQTYamount);
+    }
+
+    function stakeLocked(uint256 _LQTYamount, uint256 _unlockTime) external {
+        LQTYStaking.stakeLocked(_LQTYamount, _unlockTime);
+    }
+}
