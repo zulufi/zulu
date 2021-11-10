@@ -16,7 +16,14 @@ import "../Interfaces/IGuardian.sol";
 import "../Interfaces/ILUSDToken.sol";
 import "../Dependencies/Lockable.sol";
 
-contract LQTYStaking is ILQTYStaking, Guardable, Lockable, OwnableUpgradeable, CheckContract, BaseMath {
+contract LQTYStaking is
+    ILQTYStaking,
+    Guardable,
+    Lockable,
+    OwnableUpgradeable,
+    CheckContract,
+    BaseMath
+{
     using SafeMath for uint256;
 
     // --- Data ---
@@ -115,6 +122,14 @@ contract LQTYStaking is ILQTYStaking, Guardable, Lockable, OwnableUpgradeable, C
         emit MaxMultiplierSet(_maxMultiplier);
     }
 
+    function totalStakes(address _user) external view override returns (uint256) {
+        uint256 curLength = checkpointHistory[_user].length;
+        if (curLength == 0) {
+            return 0;
+        }
+        return checkpointHistory[_user][curLength - 1].totalStakes;
+    }
+
     function totalStakesAt(address _user, uint256 _blockNo)
         external
         view
@@ -147,7 +162,7 @@ contract LQTYStaking is ILQTYStaking, Guardable, Lockable, OwnableUpgradeable, C
         return checkpointHistory[_user][min].totalStakes;
     }
 
-    function stakeDemand(uint256 _LQTYamount) external notLocked override {
+    function stakeDemand(uint256 _LQTYamount) external override notLocked {
         _requireNonZeroAmount(_LQTYamount);
 
         claimDemandStakeRewards();
@@ -172,7 +187,7 @@ contract LQTYStaking is ILQTYStaking, Guardable, Lockable, OwnableUpgradeable, C
         _updateCheckpoint(msg.sender, _LQTYamount, true);
     }
 
-    function unstakeDemand(uint256 _LQTYamount) external notLocked override {
+    function unstakeDemand(uint256 _LQTYamount) external override notLocked {
         _requireNonZeroAmount(_LQTYamount);
 
         DemandStake memory demandStake = demandStakes[msg.sender];
@@ -198,7 +213,7 @@ contract LQTYStaking is ILQTYStaking, Guardable, Lockable, OwnableUpgradeable, C
         lqtyToken.transfer(msg.sender, LQTYToWithdraw);
     }
 
-    function stakeLocked(uint256 _LQTYamount, uint256 _unlockTime) external notLocked override {
+    function stakeLocked(uint256 _LQTYamount, uint256 _unlockTime) external override notLocked {
         _requireNonZeroAmount(_LQTYamount);
         _unlockTime = _roundToWeek(_unlockTime);
         require(
@@ -237,7 +252,7 @@ contract LQTYStaking is ILQTYStaking, Guardable, Lockable, OwnableUpgradeable, C
         _updateCheckpoint(msg.sender, _LQTYamount, true);
     }
 
-    function unstakeLocked(uint256 _index) external notLocked override {
+    function unstakeLocked(uint256 _index) external override notLocked {
         require(_index < globalLockedStakeId, "LQTYStaking: invalid index");
 
         LockedStake storage lockedStake = lockedStakes[_index];
@@ -279,7 +294,7 @@ contract LQTYStaking is ILQTYStaking, Guardable, Lockable, OwnableUpgradeable, C
         return lockedStakeArray;
     }
 
-    function claimDemandStakeRewards() public notLocked override {
+    function claimDemandStakeRewards() public override notLocked {
         DemandStake memory demandStake = demandStakes[msg.sender];
         uint256 rewards = _getPendingDemandGain(demandStake);
 
@@ -292,7 +307,7 @@ contract LQTYStaking is ILQTYStaking, Guardable, Lockable, OwnableUpgradeable, C
         _updateDemandStakeSnapshots(msg.sender);
     }
 
-    function claimLockedStakeRewards(uint256 _index) external notLocked override {
+    function claimLockedStakeRewards(uint256 _index) external override notLocked {
         require(_index < globalLockedStakeId, "LQTYStaking: invalid index");
 
         LockedStake memory lockedStake = lockedStakes[_index];
@@ -310,7 +325,7 @@ contract LQTYStaking is ILQTYStaking, Guardable, Lockable, OwnableUpgradeable, C
         }
     }
 
-    function claimAllLockedStakeRewards() public notLocked override {
+    function claimAllLockedStakeRewards() public override notLocked {
         _fillFsnapshotsPerWeekGap(_getCurrentWeek());
         uint256 rewards = 0;
         uint256 curLength = userToLockedStakesIds[msg.sender].length;
@@ -325,9 +340,18 @@ contract LQTYStaking is ILQTYStaking, Guardable, Lockable, OwnableUpgradeable, C
         }
     }
 
-    function claimAllRewards() external notLocked override {
+    function claimAllRewards() external override notLocked {
         claimDemandStakeRewards();
         claimAllLockedStakeRewards();
+    }
+
+    function computeMultiplier(uint256 _unlockTime) external view override returns (uint256) {
+        _unlockTime = _roundToWeek(_unlockTime);
+        require(
+            _unlockTime > block.timestamp,
+            "LQTYStaking: Can only lock until time in the future"
+        );
+        return _computeMultiplier(_unlockTime);
     }
 
     // --- Reward-per-unit-staked increase functions. Called by Liquity core contracts ---

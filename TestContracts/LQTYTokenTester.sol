@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 pragma solidity 0.6.11;
+pragma experimental ABIEncoderV2;
 
 import "../LQTY/LQTYToken.sol";
 
@@ -14,9 +15,9 @@ contract LQTYTokenTester is LQTYToken {
 
     function unprotectedSendToLQTYStaking(address _sender, uint256 _amount) external {
         // No check for the caller here
-        
+
         if (_isInLockupPeriod()) {_requireSenderHasNoLockPeriod(_sender);}
-        _transfer(_sender, lqtyStakingAddress, _amount);
+        _transfer(_sender, address(lqtyStaking), _amount);
     }
 
     function callInternalApprove(address owner, address spender, uint256 amount) external returns (bool) {

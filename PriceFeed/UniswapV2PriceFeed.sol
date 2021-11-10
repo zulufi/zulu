@@ -42,6 +42,8 @@ contract UniswapV2PriceFeed is MultiAssetInitializable, CheckContract, IPriceFee
 
     mapping(address => ChainlinkConfig) public chainlinkConfigMap;
 
+    mapping(address => uint256) public prices;
+
     function initialize() public initializer {
         __Ownable_init();
     }
@@ -63,8 +65,14 @@ contract UniswapV2PriceFeed is MultiAssetInitializable, CheckContract, IPriceFee
         pairConfig.decimals0 = IERC20(pairConfig.token0).decimals();
         pairConfig.decimals1 = IERC20(pairConfig.token1).decimals();
 
-        require(chainlinkConfigMap[pairConfig.token0].proxyAddress != address(0), "chainlink not set yet");
-        require(chainlinkConfigMap[pairConfig.token1].proxyAddress != address(0), "chainlink not set yet");
+        require(
+            chainlinkConfigMap[pairConfig.token0].proxyAddress != address(0),
+            "chainlink not set yet"
+        );
+        require(
+            chainlinkConfigMap[pairConfig.token1].proxyAddress != address(0),
+            "chainlink not set yet"
+        );
 
         pairConfigMap[asset] = pairConfig;
     }
@@ -235,7 +243,7 @@ contract UniswapV2PriceFeed is MultiAssetInitializable, CheckContract, IPriceFee
         onlySupportedAsset(token)
         returns (uint256)
     {
-        return internalGetPrice(token);
+        return prices[token];
     }
 
     function fetchPrice(address token)
@@ -244,6 +252,9 @@ contract UniswapV2PriceFeed is MultiAssetInitializable, CheckContract, IPriceFee
         onlySupportedAsset(token)
         returns (uint256)
     {
-        return internalGetPrice(token);
+        uint256 price = internalGetPrice(token);
+        prices[token] = price;
+        emit PriceUpdated(token, price);
+        return price;
     }
 }

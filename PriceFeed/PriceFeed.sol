@@ -91,9 +91,6 @@ contract PriceFeed is CheckContract, MultiAssetInitializable, IPriceFeed {
     /// @notice The event emitted when the stored price is not updated due to the anchor
     event PriceGuarded(address indexed token, uint256 chainlinkPrice, uint256 anchor);
 
-    /// @notice The event emitted when the stored price is updated
-    event PriceUpdated(address indexed token, uint256 price);
-
     /// @notice The event emitted when anchor price is updated
     event UniswapPriceUpdated(
         address indexed token,

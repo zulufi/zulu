@@ -31,6 +31,8 @@ interface ICakeMiner {
 
     function deposit(address _asset, uint256 _amount) external;
 
+    function balanceOfAsset(address _asset) external view returns (uint256);
+
     function sendAsset(
         address _asset,
         address _user,

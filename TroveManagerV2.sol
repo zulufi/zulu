@@ -16,6 +16,8 @@ import "./Dependencies/CheckContract.sol";
 import "./Dependencies/LiquityMath.sol";
 import "./Dependencies/console.sol";
 import "./Dependencies/MultiAssetInitializable.sol";
+import "./Interfaces/ILUSDToken.sol";
+import "./Interfaces/IReservePool.sol";
 
 contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITroveManagerV2 {
     using SafeMath for uint;
@@ -28,6 +30,8 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
 
     address public redeemerOperationsAddress;
 
+    address public reservePoolAddress;
+
     ISortedTroves public sortedTroves;
 
     IAssetConfigManager public assetConfigManager;
@@ -37,6 +41,10 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
     ICommunityIssuance public communityIssuance;
 
     ICakeMiner public cakeMiner;
+
+    ILUSDToken public lusdToken;
+
+    IReservePool public reservePool;
 
     // Store the necessary data for a trove
     struct Trove {
@@ -88,7 +96,7 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
     mapping (address => mapping(address => uint)) public lqtyRewardSnapshots;
 
     // trove address => asset address => accrued LQTY rewards
-    mapping (address => mapping(address => uint)) accruedLQTYRewards;
+    mapping (address => mapping(address => uint)) public accruedLQTYRewards;
 
     // --- Dependency setter ---
 
@@ -108,7 +116,9 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         address _cakeMinerAddress,
         address _assetConfigManagerAddress,
         address _globalConfigManagerAddress,
-        address _communityIssuanceAddress
+        address _communityIssuanceAddress,
+        address _lusdTokenAddress,
+        address _reservePoolAddress
     )
         external
         override
@@ -125,6 +135,8 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         checkContract(_globalConfigManagerAddress);
         checkContract(_liquidatorOperationsAddress);
         checkContract(_communityIssuanceAddress);
+        checkContract(_lusdTokenAddress);
+        checkContract(_reservePoolAddress);
 
         borrowerOperationsAddress = _borrowerOperationsAddress;
         liquidatorOperationsAddress = _liquidatorOperationsAddress;
@@ -134,6 +146,9 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         assetConfigManager = IAssetConfigManager(_assetConfigManagerAddress);
         globalConfigManager = IGlobalConfigManager(_globalConfigManagerAddress);
         communityIssuance = ICommunityIssuance(_communityIssuanceAddress);
+        lusdToken = ILUSDToken(_lusdTokenAddress);
+        reservePool = IReservePool(_reservePoolAddress);
+        reservePoolAddress = _reservePoolAddress;
 
         emit BorrowerOperationsAddressChanged(_borrowerOperationsAddress);
         emit LiquidatorOperationsAddressChanged(_liquidatorOperationsAddress);
@@ -143,6 +158,8 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         emit AssetConfigManagerAddressChanged(_assetConfigManagerAddress);
         emit GlobalConfigManagerAddressChanged(_globalConfigManagerAddress);
         emit CommunityIssuanceAddressChanged(_communityIssuanceAddress);
+        emit LUSDTokenAddressChanged(_lusdTokenAddress);
+        emit ReservePoolAddressChanged(_reservePoolAddress);
     }
 
     function setDebtRate(address _asset, uint _rate) external override onlyOwner {
@@ -171,7 +188,17 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
     }
 
     function _updateDebtR(address _asset) internal {
+        DebtR memory _oldDebtR = debtRs[_asset];
         DebtR memory _debtR = _currentDebtR(_asset);
+
+        uint256 _totalNormalizedDebt = totalDebtsPerAsset[_asset];
+        uint256 _debtInterest = _totalNormalizedDebt.mul(_debtR.R.sub(_oldDebtR.R)).div(DECIMAL_PRECISION);
+        if (_debtInterest > 0) {
+            lusdToken.mint(reservePoolAddress, _debtInterest);
+            reservePool.depositLUSDInterest(_asset, _debtInterest);
+            emit LUSDInterestMinted(_asset, _debtInterest);
+        }
+
         debtRs[_asset] = _debtR;
         emit DebtRUpdated(_asset, _debtR.rate, _debtR.R);
     }
@@ -603,14 +630,15 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         sortedTroves.insert(_asset, _borrower, NICR, _upperHint, _lowerHint);
 
         emit TotalStakesUpdated(_asset, totalStakesPerAsset[_asset]);
+        emit TroveUpdated(_asset, _borrower, _debt, _nDebt, _coll, _stakes, TroveOperations.openTrove);
         emit TroveOpened(
             _asset,
             _borrower,
-            _coll,
             _debt,
             _nDebt,
-            _gasCompensation,
+            _coll,
             _stakes,
+            _gasCompensation,
             arrayIndex
         );
     }
@@ -621,7 +649,8 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         uint _price,
         uint _redistributedColl,
         uint _redistributedDebt,
-        Status _closedStatus
+        Status _closedStatus,
+        TroveOperations _operation
     )
         external
         override
@@ -630,7 +659,6 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         _requireMoreThanOneTroveInSystem(_asset);
         _requireTroveIsActive(_borrower, _asset);
         _requireClosedStatus(_closedStatus);
-        DataTypes.AssetConfig memory _config = assetConfigManager.get(_asset);
 
         // update debtR
         _updateDebtR(_asset);
@@ -681,6 +709,7 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
 
         emit TotalStakesUpdated(_asset, totalStakesPerAsset[_asset]);
         emit TroveClosed(_asset, _borrower, _closedStatus);
+        emit TroveUpdated(_asset, _borrower, 0, 0, 0, 0, _operation);
     }
 
     function adjustTrove(
@@ -692,7 +721,8 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         bool _isDebtIncrease,
         uint _price,
         address _upperHint,
-        address _lowerHint
+        address _lowerHint,
+        TroveOperations _operation
     )
         external
         override
@@ -700,8 +730,7 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         _requireCallerIsBOorRO();
         _requireTroveIsActive(_borrower, _asset);
 
-        DataTypes.AssetConfig memory _config = assetConfigManager.get(_asset);
-        _requireAdjustValid(_borrower, _config, _collChange, _isCollIncrease, _debtChange, _isDebtIncrease, _price);
+        _requireAdjustValid(_borrower, assetConfigManager.get(_asset), _collChange, _isCollIncrease, _debtChange, _isDebtIncrease, _price);
 
         // update debtR
         _updateDebtR(_asset);
@@ -734,7 +763,7 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         sortedTroves.reInsert(_asset, _borrower, LiquityMath._computeNominalCR(vars.newColl, vars.newNormalizedDebt), _upperHint, _lowerHint);
 
         emit TotalStakesUpdated(_asset, totalStakesPerAsset[_asset]);
-        emit TroveUpdated(_asset, _borrower, _newDebt, vars.newNormalizedDebt, vars.newColl, vars.newStake);
+        emit TroveUpdated(_asset, _borrower, _newDebt, vars.newNormalizedDebt, vars.newColl, vars.newStake, _operation);
     }
 
     function issueLQTYRewards(
@@ -745,10 +774,11 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         override
         returns (uint)
     {
+        _requireCallerIsBorrowerOperations();
         _applyPendingLQTYRewards(_borrower, _asset);
 
-        uint curRewards = lqtyRewardSnapshots[_borrower][_asset];
-        lqtyRewardSnapshots[_borrower][_asset] = 0;
+        uint curRewards = accruedLQTYRewards[_borrower][_asset];
+        accruedLQTYRewards[_borrower][_asset] = 0;
         emit IssueLQTYRewards(_asset, _borrower, curRewards);
 
         return curRewards;
@@ -959,7 +989,7 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         uint totalStakes = totalStakesPerAsset[_asset];
         if (totalStakes > 0) {
             uint accruedLQTYReward = communityIssuance.issueLiquidityLQTY(_asset);
-            uint rewardPerStake = accruedLQTYReward.div(totalStakes);
+            uint rewardPerStake = accruedLQTYReward.mul(DECIMAL_PRECISION).div(totalStakes);
             uint latestLQTYReward = L_LQTYRewards[_asset].add(rewardPerStake);
             L_LQTYRewards[_asset] = latestLQTYReward;
             emit L_LQTYRewardsUpdated(_asset, latestLQTYReward);
@@ -986,7 +1016,7 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         _updateLQTYRewardIndex(_asset);
 
         uint rewardPerStake = L_LQTYRewards[_asset].sub(lqtyRewardSnapshots[_borrower][_asset]);
-        uint rewards = rewardPerStake.mul(Troves[_borrower][_asset].stake);
+        uint rewards = rewardPerStake.mul(Troves[_borrower][_asset].stake).div(DECIMAL_PRECISION);
         uint latestLQTYReward = accruedLQTYRewards[_borrower][_asset].add(rewards);
         accruedLQTYRewards[_borrower][_asset] = latestLQTYReward;
         emit ApplyLQTYRewards(_asset, _borrower, rewards);

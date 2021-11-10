@@ -19,6 +19,7 @@ interface IRedeemerOperations {
     event GuardianAddressChanged(address _guardianAddress);
     event CommunityIssuanceAddressChanged(address _communityIssuanceAddress);
     event LockerAddressChanged(address _lockerAddress);
+    event HintNICRFactorFloorChanged(uint _factor);
 
     event TroveRedeemed(
         address indexed _asset,
@@ -58,6 +59,8 @@ interface IRedeemerOperations {
 
     // --- Functions ---
     function setAddresses(ContractAddresses memory addresses) external;
+
+    function setHintPartialNICRFactorFloor(uint _factor) external;
 
     function redeemCollateral(
         address _asset,

@@ -15,6 +15,16 @@ interface ITroveManagerV2 {
         closedByRedemption
     }
 
+    enum TroveOperations {
+        openTrove,
+        adjustByOwner,
+        adjustByRedemption,
+        closeByOwner,
+        liquidateInNormalMode,
+        liquidateInRecoveryMode,
+        closeByRedemption
+    }
+
     struct DebtR {
         uint rate; // rate of seconds, has a decimal of DECIMAL_PRECISION
         uint timestamp;
@@ -31,9 +41,11 @@ interface ITroveManagerV2 {
     event AssetConfigManagerAddressChanged(address _assetConfigManagerAddress);
     event GlobalConfigManagerAddressChanged(address _globalConfigManagerAddress);
     event CommunityIssuanceAddressChanged(address _globalConfigManagerAddress);
+    event LUSDTokenAddressChanged(address _lusdTokenAddress);
+    event ReservePoolAddressChanged(address _reservePoolAddress);
 
     event TroveOpened(address indexed _asset, address indexed _borrower, uint _debt, uint _nDebt, uint _coll, uint _stake, uint _gasCompensation, uint _arrayIndex);
-    event TroveUpdated(address indexed _asset, address indexed _borrower, uint _debt, uint _nDebt, uint _coll, uint _stake);
+    event TroveUpdated(address indexed _asset, address indexed _borrower, uint _debt, uint _nDebt, uint _coll, uint _stake, TroveOperations _operation);
     event TroveClosed(address indexed _asset, address indexed _borrower, Status _closedStatus);
     event TotalStakesUpdated(address indexed _asset, uint _newTotalStakes);
     event SystemSnapshotsUpdated(address indexed _asset, uint _totalStakesSnapshot, uint _totalCollateralSnapshot);
@@ -46,6 +58,7 @@ interface ITroveManagerV2 {
     event LQTYRewardSnapshotUpdated(address indexed _asset, address indexed _borrower, uint _L_LQTYReward);
     event TroveIndexUpdated(address indexed _asset, address _borrower, uint _newIndex);
     event DebtRUpdated(address indexed _asset, uint _newRate, uint _newR);
+    event LUSDInterestMinted(address indexed _asset, uint _amount);
 
     // --- Functions ---
 
@@ -57,7 +70,9 @@ interface ITroveManagerV2 {
         address _cakeMinerAddress,
         address _assetConfigManagerAddress,
         address _globalConfigManagerAddress,
-        address _communityIssuanceAddress
+        address _communityIssuanceAddress,
+        address _lusdTokenAddress,
+        address _reservePoolAddress
     ) external;
 
     function setDebtRate(address _asset, uint _rate) external;
@@ -82,7 +97,8 @@ interface ITroveManagerV2 {
         bool _isDebtIncrease,
         uint _price,
         address _upperHint,
-        address _lowerHint
+        address _lowerHint,
+        TroveOperations _operation
     ) external;
 
     function closeTrove(
@@ -91,7 +107,8 @@ interface ITroveManagerV2 {
         uint _price,
         uint _redistributedColl,
         uint _redistributedDebt,
-        Status closedStatus
+        Status _closedStatus,
+        TroveOperations _operation
     ) external;
 
     function issueLQTYRewards(address _borrower, address _asset) external returns (uint);

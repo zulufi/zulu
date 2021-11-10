@@ -165,6 +165,15 @@ contract FeeRateModel is OwnableUpgradeable, CheckContract, BaseMath, IFeeRateMo
         );
     }
 
+    function trialCalcRedeemRate(address asset, uint price, uint redeemAmount) external view returns(uint) {
+        uint baseRate = _calcBaseRateFromRedemption(price, redeemAmount);
+        DataTypes.AssetConfig memory config = configManager.get(asset);
+        return LiquityMath._min(
+            config.feeRateParams.redeemFeeRateFloor.add(baseRate),
+            config.feeRateParams.redeemFeeRateCeil
+        );
+    }
+
     function getRedeemRate(address asset, uint price, uint redeemAmount)
         external
         view
@@ -204,6 +213,15 @@ contract FeeRateModel is OwnableUpgradeable, CheckContract, BaseMath, IFeeRateMo
     }
 
     function updateBaseRateFromRedemption(uint price, uint redeemAmount) internal {
+        uint newBaseRate = _calcBaseRateFromRedemption(price, redeemAmount);
+
+        baseRate = newBaseRate;
+        emit BaseRateUpdated(newBaseRate);
+
+        updateLastFeeOpTime();
+    }
+
+    function _calcBaseRateFromRedemption(uint price, uint redeemAmount) internal view returns(uint) {
         uint decayedBaseRate = calcDecayedBaseRate();
         assert(decayedBaseRate <= DECIMAL_PRECISION);
 
@@ -216,11 +234,7 @@ contract FeeRateModel is OwnableUpgradeable, CheckContract, BaseMath, IFeeRateMo
         uint newBaseRate = decayedBaseRate.add(redeemedLUSDFraction.div(beta));
         newBaseRate = LiquityMath._min(newBaseRate, DECIMAL_PRECISION); // cap baseRate at a maximum of 100%
         assert(newBaseRate > 0); // Base rate is always non-zero after redemption
-
-        baseRate = newBaseRate;
-        emit BaseRateUpdated(newBaseRate);
-
-        updateLastFeeOpTime();
+        return newBaseRate;
     }
 
     function calcDecayedBaseRate() internal view returns (uint) {

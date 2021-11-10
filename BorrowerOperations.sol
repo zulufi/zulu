@@ -104,6 +104,13 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
         ILUSDToken lusdToken;
     }
 
+    struct FlashLoanLocalValues {
+        IActivePool activePool;
+        ICakeMiner cakeMiner;
+        address activePoolAddress;
+        address cakeMinerAddress;
+    }
+
     // --- Dependency setters ---
 
     function initialize() public initializer {
@@ -174,21 +181,47 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
         mutex
         override
     {
-        address _activePoolAddress = address(activePool);
-        uint256 _balanceBefore = address(_asset).balanceOf(_activePoolAddress);
-        require(_balanceBefore >= _amount, "has no enough amount of asset for flash loan");
+        FlashLoanLocalValues memory lvs = FlashLoanLocalValues(activePool, cakeMiner, address(activePool), address(cakeMiner));
+
+        bool _isCakeMinerSupportedAsset = lvs.cakeMiner.isSupported(_asset);
+        uint256 _balanceBefore = _isCakeMinerSupportedAsset ?
+                                 address(_asset).balanceOf(lvs.cakeMinerAddress) :
+                                 address(_asset).balanceOf(lvs.activePoolAddress);
+        // asset amount in masterChef
+        uint256 _assetBalanceBefore = _isCakeMinerSupportedAsset ? lvs.cakeMiner.balanceOfAsset(_asset) : 0;
+        require(_balanceBefore.add(_assetBalanceBefore) >= _amount, "has no enough amount of asset for flash loan");
+
         uint256 _fee = _amount.div(assetConfigManager.get(_asset).flashLoanFeeDivisor);
-
         IFlashLoanReceiver receiver = IFlashLoanReceiver(_receiver);
-        activePool.sendAsset(_asset, _receiver, _amount);
+        if (_isCakeMinerSupportedAsset) {
+            lvs.cakeMiner.issueCake(_asset, address(0));
+            lvs.cakeMiner.sendAsset(_asset, _receiver, _amount);
+            receiver.executeOperation(_asset, _amount, _fee, lvs.cakeMinerAddress, _params);
+            uint256 _assetBalanceAfter = lvs.cakeMiner.balanceOfAsset(_asset);
+            require(_assetBalanceAfter <= _assetBalanceBefore, "asset balanceAfter is greater than before");
+            // deposit the withdraw asset back
+            if (_assetBalanceBefore > _assetBalanceAfter) {
+                lvs.cakeMiner.deposit(_asset, _assetBalanceBefore.sub(_assetBalanceAfter));
+                require(_assetBalanceBefore == lvs.cakeMiner.balanceOfAsset(_asset), "balance in cakeMiner not equals");
+            }
+        } else {
+            lvs.activePool.sendAsset(_asset, _receiver, _amount);
+            receiver.executeOperation(_asset, _amount, _fee, lvs.activePoolAddress, _params);
+        }
 
-        receiver.executeOperation(_asset, _amount, _fee, _activePoolAddress, _params);
-
-        uint256 _balanceAfter = address(_asset).balanceOf(_activePoolAddress);
+        uint256 _balanceAfter = _isCakeMinerSupportedAsset ?
+                                address(_asset).balanceOf(lvs.cakeMinerAddress) :
+                                address(_asset).balanceOf(lvs.activePoolAddress);
         require(_balanceAfter >= _balanceBefore.add(_fee), "flash loan not repay the debt");
 
         uint256 _realFee = _balanceAfter.sub(_balanceBefore);
-        activePool.sendAsset(_asset, address(reservePool), _realFee);
+
+        if (_isCakeMinerSupportedAsset) {
+            lvs.cakeMiner.sendAsset(_asset, address(reservePool), _realFee);
+        } else {
+            lvs.activePool.sendAsset(_asset, address(reservePool), _realFee);
+        }
+
         reservePool.depositAsset(_asset, _realFee);
         emit FlashLoan(_receiver, _asset, _amount, _fee, _realFee);
     }
@@ -327,7 +360,7 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
             _requireSufficientLUSDBalance(contractsCache.lusdToken, inputValues._borrower, vars.netDebtChange);
         }
 
-        contractsCache.troveManager.adjustTrove(inputValues._borrower, inputValues._asset, inputValues._collChange, inputValues._isCollIncrease, vars.netDebtChange, inputValues._isDebtIncrease, vars.price, inputValues._upperHint, inputValues._lowerHint);
+        contractsCache.troveManager.adjustTrove(inputValues._borrower, inputValues._asset, inputValues._collChange, inputValues._isCollIncrease, vars.netDebtChange, inputValues._isDebtIncrease, vars.price, inputValues._upperHint, inputValues._lowerHint, ITroveManagerV2.TroveOperations.adjustByOwner);
 
         emit LUSDBorrowingFeePaid(inputValues._asset, msg.sender, vars.stakingRewardAmount, vars.reserveAmount, vars.LUSDFee);
 
@@ -363,7 +396,7 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
         uint _gasCompensation = contractsCache.troveManager.getTroveGasCompensation(msg.sender, _asset);
         _requireSufficientLUSDBalance(contractsCache.lusdToken, msg.sender, debt.sub(_gasCompensation));
 
-        contractsCache.troveManager.closeTrove(msg.sender, _asset, price, 0, 0, ITroveManagerV2.Status.closedByOwner);
+        contractsCache.troveManager.closeTrove(msg.sender, _asset, price, 0, 0, ITroveManagerV2.Status.closedByOwner, ITroveManagerV2.TroveOperations.closeByOwner);
 
         // Burn the repaid LUSD from the user's balance and the gas compensation from the Gas Pool
         contractsCache.lusdToken.burn(msg.sender, debt.sub(_gasCompensation));

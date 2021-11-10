@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 
 pragma solidity 0.6.11;
+pragma experimental ABIEncoderV2;
 
 import "../Dependencies/CheckContract.sol";
 import "../Dependencies/SafeMath.sol";
+import "../Interfaces/ILQTYStaking.sol";
 import "../Interfaces/ILQTYToken.sol";
 import "../Interfaces/ILockupContractFactory.sol";
 import "../Dependencies/console.sol";
@@ -64,6 +66,8 @@ contract LQTYToken is CheckContract, ILQTYToken, Initializable {
     string constant internal _VERSION = "1";
     uint8 constant internal  _DECIMALS = 18;
 
+    mapping (address => Checkpoint[]) checkpoints;
+
     mapping (address => uint256) private _balances;
     mapping (address => mapping (address => uint256)) private _allowances;
     uint private _totalSupply;
@@ -97,18 +101,12 @@ contract LQTYToken is CheckContract, ILQTYToken, Initializable {
     address public investorAddress;
 
     address public communityIssuanceAddress;
-    address public lqtyStakingAddress;
+    ILQTYStaking public lqtyStaking;
 
     uint internal lpRewardsEntitlement;
     uint internal communityIssuanceEntitlement;
 
     ILockupContractFactory public lockupContractFactory;
-
-    // --- Events ---
-
-    event CommunityIssuanceAddressSet(address _communityIssuanceAddress);
-    event LQTYStakingAddressSet(address _lqtyStakingAddress);
-    event LockupContractFactoryAddressSet(address _lockupContractFactoryAddress);
 
     // --- Functions ---
 
@@ -136,7 +134,7 @@ contract LQTYToken is CheckContract, ILQTYToken, Initializable {
         deploymentStartTime  = block.timestamp;
 
         communityIssuanceAddress = _communityIssuanceAddress;
-        lqtyStakingAddress = _lqtyStakingAddress;
+        lqtyStaking = ILQTYStaking(_lqtyStakingAddress);
         lockupContractFactory = ILockupContractFactory(_lockupFactoryAddress);
 
         bytes32 hashedName = keccak256(bytes(_NAME));
@@ -174,6 +172,22 @@ contract LQTYToken is CheckContract, ILQTYToken, Initializable {
 
     function balanceOf(address account) external view override returns (uint256) {
         return _balances[account];
+    }
+
+    function getCurrentVotes(address account) external view override returns (uint256) {
+        uint256 stakes = lqtyStaking.totalStakes(account);
+        uint256 curLength = checkpoints[account].length;
+        if (curLength == 0) {
+            return stakes;
+        } else {
+            return checkpoints[account][curLength - 1].balance.add(stakes);
+        }
+    }
+
+    function getPriorVotes(address account, uint256 blockNo) external view override returns (uint256) {
+        require(blockNo <= block.number, "LQTYToken: invalid blockNo");
+
+        return _balanceOfAt(account, blockNo).add(lqtyStaking.totalStakesAt(account, blockNo));
     }
 
     function getDeploymentStartTime() external view override returns (uint256) {
@@ -243,7 +257,7 @@ contract LQTYToken is CheckContract, ILQTYToken, Initializable {
     function sendToLQTYStaking(address _sender, uint256 _amount) external override {
         _requireCallerIsLQTYStaking();
         if (_isInLockupPeriod()) { _requireSenderHasNoLockPeriod(_sender); }  // Prevent the team & investor from staking LQTY
-        _transfer(_sender, lqtyStakingAddress, _amount);
+        _transfer(_sender, address(lqtyStaking), _amount);
     }
 
     // --- EIP 2612 functionality ---
@@ -302,6 +316,8 @@ contract LQTYToken is CheckContract, ILQTYToken, Initializable {
         _balances[sender] = _balances[sender].sub(amount, "ERC20: transfer amount exceeds balance");
         _balances[recipient] = _balances[recipient].add(amount);
         emit Transfer(sender, recipient, amount);
+
+        _updateCheckpoints(sender, recipient, amount);
     }
 
     function _mint(address account, uint256 amount) internal {
@@ -310,6 +326,8 @@ contract LQTYToken is CheckContract, ILQTYToken, Initializable {
         _totalSupply = _totalSupply.add(amount);
         _balances[account] = _balances[account].add(amount);
         emit Transfer(address(0), account, amount);
+
+        _updateCheckpoints(address(0), account, amount);
     }
 
     function _approve(address owner, address spender, uint256 amount) internal {
@@ -318,6 +336,62 @@ contract LQTYToken is CheckContract, ILQTYToken, Initializable {
 
         _allowances[owner][spender] = amount;
         emit Approval(owner, spender, amount);
+    }
+
+    function _balanceOfAt(address account, uint256 blockNo) internal view returns (uint256) {
+        uint256 curLength = checkpoints[account].length;
+        if (curLength == 0) {
+            return 0;
+        }
+
+        // Binary search
+        uint256 min = 0;
+        uint256 max = curLength - 1;
+
+        if (blockNo < checkpoints[account][min].blockNo) {
+            return 0;
+        }
+
+        while (min < max) {
+            uint256 mid = (min + max + 1) / 2;
+            if (checkpoints[account][mid].blockNo <= blockNo) {
+                min = mid;
+            } else {
+                max = mid - 1;
+            }
+        }
+        return checkpoints[account][min].balance;
+    }
+
+    function _updateCheckpoints(address from, address to, uint256 amount) internal {
+        if (from != to && amount > 0) {
+            if (from != address(0)) {
+                _updateCheckpoint(from, amount, false);
+            }
+            if (to != address(0)) {
+                _updateCheckpoint(to, amount, true);
+            }
+        }
+    }
+
+    function _updateCheckpoint(address account, uint256 amount, bool increase) internal {
+        uint256 curLength = checkpoints[account].length;
+        Checkpoint memory checkpoint;
+        if (curLength > 0) {
+            checkpoint = checkpoints[account][curLength - 1];
+        }
+        checkpoint.balance = increase
+            ? checkpoint.balance.add(amount)
+            : checkpoint.balance.sub(amount);
+        if (checkpoint.blockNo == block.number) {
+            checkpoints[account][curLength - 1] = checkpoint;
+        } else {
+            checkpoint.blockNo = block.number;
+            checkpoints[account].push(checkpoint);
+            curLength = curLength + 1;
+        }
+
+        emit CheckpointUpdated(account, curLength - 1, checkpoint);
     }
 
     // --- Helper functions ---
@@ -340,7 +414,7 @@ contract LQTYToken is CheckContract, ILQTYToken, Initializable {
         );
         require(
             _recipient != communityIssuanceAddress &&
-            _recipient != lqtyStakingAddress,
+            _recipient != address(lqtyStaking),
             "LQTY: Cannot transfer tokens directly to the community issuance or staking contract"
         );
     }
@@ -359,7 +433,7 @@ contract LQTYToken is CheckContract, ILQTYToken, Initializable {
     }
 
     function _requireCallerIsLQTYStaking() internal view {
-         require(msg.sender == lqtyStakingAddress, "LQTYToken: caller must be the LQTYStaking contract");
+         require(msg.sender == address(lqtyStaking), "LQTYToken: caller must be the LQTYStaking contract");
     }
 
     // --- Optional functions ---

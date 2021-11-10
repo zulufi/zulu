@@ -423,7 +423,8 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
             _price,
             singleLiquidation.collToRedistribute,
             singleLiquidation.debtToRedistribute,
-            ITroveManagerV2.Status.closedByLiquidation
+            ITroveManagerV2.Status.closedByLiquidation,
+            ITroveManagerV2.TroveOperations.liquidateInNormalMode
         );
 
         emit TroveLiquidated(
@@ -482,7 +483,8 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
                 _price,
                 singleLiquidation.collToRedistribute,
                 singleLiquidation.debtToRedistribute,
-                ITroveManagerV2.Status.closedByLiquidation
+                ITroveManagerV2.Status.closedByLiquidation,
+                ITroveManagerV2.TroveOperations.liquidateInRecoveryMode
             );
 
             emit TroveLiquidated(

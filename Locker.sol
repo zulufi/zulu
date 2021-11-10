@@ -34,6 +34,6 @@ contract Locker is ILocker, OwnableUpgradeable {
     }
 
     function _requireCallerIsBorrowerOperations() internal view {
-        require(msg.sender == borrowerOperationsAddress, "Guardian: Caller is not the BorrowerOperations");
+        require(msg.sender == borrowerOperationsAddress, "Locker: Caller is not the BorrowerOperations");
     }
 }

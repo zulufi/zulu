@@ -23,8 +23,6 @@ interface IBorrowerOperations {
     event CommunityIssuanceAddressChanged(address _communityIssuanceAddress);
     event LockerAddressChanged(address _lockerAddress);
 
-    event TroveCreated(address indexed _asset, address indexed _borrower, uint arrayIndex);
-    event TroveUpdated(address indexed _asset, address indexed _borrower, uint _debt, uint _coll, uint stake, BorrowerOperation operation);
     event LUSDBorrowingFeePaid(address indexed _asset, address indexed _borrower, uint _stakingRewardAmount, uint _reserveAmount, uint _LUSDFee);
     event TroveCreatedFor(address indexed _asset, address indexed _caller, address indexed _borrower);
 

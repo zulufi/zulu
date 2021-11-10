@@ -101,7 +101,7 @@ contract MultiTroveGetter is Initializable {
     function _getTroveData(address _borrower, address _asset) internal view returns (CombinedTroveData memory troveData) {
         ITroveManagerV2 troveManagerCached = troveManager;
         troveData.owner = _borrower;
-        (uint debt, uint coll) = troveManagerCached.getTroveDebtAndColl(msg.sender, _asset);
+        (uint debt, uint coll) = troveManagerCached.getTroveDebtAndColl(_borrower, _asset);
         troveData.debt = debt;
         troveData.coll = coll;
         troveData.stake = troveManagerCached.getTroveStake(_borrower, _asset);

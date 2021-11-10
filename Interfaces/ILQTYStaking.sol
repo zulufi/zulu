@@ -59,11 +59,13 @@ interface ILQTYStaking {
         address _redeemerOperationsAddress,
         address _guardianAddress,
         address _lockerAddress
-    )  external;
+    ) external;
 
     function setBonusMultiplierPerWeek(uint256 _bonusMultiplierPerWeek) external;
 
     function setMaxMultiplier(uint256 _maxMultiplier) external;
+
+    function totalStakes(address _user) external view returns (uint256);
 
     function totalStakesAt(address _user, uint256 _blockNo) external view returns (uint256);
 
@@ -94,4 +96,6 @@ interface ILQTYStaking {
     function getPendingDemandGain(address _user) external view returns (uint256);
 
     function getPendingLockedGain(uint256 _index) external view returns (uint256);
+
+    function computeMultiplier(uint256 _unlockTime) external view returns (uint256);
 }

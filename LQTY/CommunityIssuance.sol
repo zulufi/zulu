@@ -240,7 +240,7 @@ contract CommunityIssuance is ICommunityIssuance, MultiAssetInitializable, Check
     }
 
     function sendLQTY(address _account, uint _LQTYamount) external override {
-        _requireCallerIsStabilityPool();
+        _requireCallerIsSPOrBO();
 
         lqtyToken.transfer(_account, _LQTYamount);
     }
@@ -267,6 +267,13 @@ contract CommunityIssuance is ICommunityIssuance, MultiAssetInitializable, Check
 
     function _requireCallerIsStabilityPool() internal view {
         require(msg.sender == stabilityPoolAddress, "CommunityIssuance: caller is not SP");
+    }
+
+    function _requireCallerIsSPOrBO() internal view {
+        require(
+            msg.sender == stabilityPoolAddress || msg.sender == borrowerOperationsAddress,
+            "CommunityIssuance: caller is not SP or BO"
+        );
     }
 
     function _requireCallerIsTroveManager() internal view {

@@ -60,6 +60,8 @@ contract RedeemerOperations is
 
     ICommunityIssuance public communityIssuance;
 
+    uint public hintPartialNICRFactorFloor;
+
     /* --- Variable container structs  ---
 
     Used to hold, return and assign variables inside a function, in order to avoid the error:
@@ -113,6 +115,12 @@ contract RedeemerOperations is
 
     function initialize() public initializer {
         __Ownable_init();
+        setHintPartialNICRFactorFloor(DECIMAL_PRECISION.sub(1e16));
+    }
+
+    function setHintPartialNICRFactorFloor(uint _factor) public override onlyOwner {
+        hintPartialNICRFactorFloor = _factor;
+        emit HintNICRFactorFloorChanged(_factor);
     }
 
     function setAddresses(
@@ -209,7 +217,8 @@ contract RedeemerOperations is
                 val.price,
                 0,
                 0,
-                ITroveManagerV2.Status.closedByRedemption
+                ITroveManagerV2.Status.closedByRedemption,
+                ITroveManagerV2.TroveOperations.closeByRedemption
             );
 
             /*
@@ -237,8 +246,9 @@ contract RedeemerOperations is
              *
              * If the resultant net debt of the partial is less than the minimum, net debt we bail.
              */
+            uint NICR = _contractsCache.troveManager.computeNominalICR(_assetConfig.asset, singleRedemption.newColl, singleRedemption.newDebt);
             if (
-                troveManager.computeNominalICR(_assetConfig.asset, singleRedemption.newColl, singleRedemption.newDebt) != val.partialRedemptionHintNICR ||
+                NICR.mul(DECIMAL_PRECISION) < val.partialRedemptionHintNICR.mul(hintPartialNICRFactorFloor) ||
                 singleRedemption.newDebt.sub(singleRedemption.gasCompensation) < _assetConfig.minDebt
             ) {
                 singleRedemption.cancelledPartial = true;
@@ -254,7 +264,8 @@ contract RedeemerOperations is
                 false,
                 val.price,
                 val.upperPartialRedemptionHint,
-                val.lowerPartialRedemptionHint
+                val.lowerPartialRedemptionHint,
+                ITroveManagerV2.TroveOperations.adjustByRedemption
             );
 
             // partial redepmtion since newDebt and newColl are not 0

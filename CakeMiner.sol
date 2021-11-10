@@ -26,6 +26,14 @@ interface IMasterChef {
             uint256
         );
 
+    function userInfo(uint256 _pid, address _user)
+        external
+        view
+        returns (
+            uint256,
+            uint256
+    );
+
     function deposit(uint256 _pid, uint256 _amount) external;
 
     function withdraw(uint256 _pid, uint256 _amount) external;
@@ -148,6 +156,11 @@ contract CakeMiner is BaseMath, CheckContract, MultiAssetInitializable, ICakeMin
         return initializedAssets[_asset];
     }
 
+    function balanceOfAsset(address _asset) external view override returns (uint256) {
+        (uint256 balance,) = masterChef.userInfo(pids[_asset], address(this));
+        return balance;
+    }
+
     function _accrueCake(address _asset, uint256 totalStakes) internal {
         uint256 cakeBalanceBefore = cake.balanceOf(address(this));
         masterChef.deposit(pids[_asset], 0);
@@ -258,7 +271,10 @@ contract CakeMiner is BaseMath, CheckContract, MultiAssetInitializable, ICakeMin
         address _to,
         uint256 _amount
     ) internal {
-        _withdraw(_asset, _amount);
+        uint256 _balance = address(_asset).balanceOf(address(this));
+        if (_balance < _amount) {
+            _withdraw(_asset, _amount.sub(_balance));
+        }
         address(_asset).safeTransferToken(_to, _amount);
         emit AssetSent(_asset, _to, _amount);
     }
@@ -299,7 +315,7 @@ contract CakeMiner is BaseMath, CheckContract, MultiAssetInitializable, ICakeMin
     }
 
     function issueCake(address _asset, address _user) external override onlySupportedAsset(_asset) {
-        _requireCallerIsTO();
+        _requireCallerIsTOOrBO();
 
         _issueCake(_asset, _user);
     }
@@ -325,8 +341,9 @@ contract CakeMiner is BaseMath, CheckContract, MultiAssetInitializable, ICakeMin
         return _getPendingCake(_asset, _user, stake);
     }
 
-    function _requireCallerIsTO() internal view {
-        require(msg.sender == address(troveManager), "CakeMiner: Caller is not TroveManager");
+    function _requireCallerIsTOOrBO() internal view {
+        require(msg.sender == address(troveManager) || msg.sender == borrowerOperationsAddress,
+                "CakeMiner: Caller is not TroveManager or BorrowerOperations");
     }
 
     function _requireCallerIsBO() internal view {
