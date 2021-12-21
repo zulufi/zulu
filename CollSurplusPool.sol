@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
 
 pragma solidity 0.6.11;
+pragma experimental ABIEncoderV2;
 
 import "./Interfaces/ICollSurplusPool.sol";
+import "./Interfaces/IAssetConfigManager.sol";
 import "./Dependencies/SafeMath.sol";
 import "./Dependencies/OwnableUpgradeable.sol";
 import "./Dependencies/CheckContract.sol";
@@ -16,11 +18,12 @@ contract CollSurplusPool is OwnableUpgradeable, CheckContract, ICollSurplusPool 
 
     string constant public NAME = "CollSurplusPool";
 
+    IAssetConfigManager public assetConfigManager;
+
     address public borrowerOperationsAddress;
     address public liquidatorOperationsAddress;
     address public redeemerOperationsAddress;
     address public activePoolAddress;
-    address public cakeMinerAddress;
 
     // deposited ether tracker
     mapping (address => uint256) internal assetBalances;
@@ -34,11 +37,11 @@ contract CollSurplusPool is OwnableUpgradeable, CheckContract, ICollSurplusPool 
     }
 
     function setAddresses(
+        address _assetConfigManagerAddress,
         address _borrowerOperationsAddress,
         address _liquidatorOperationsAddress,
         address _redeemerOperationsAddress,
-        address _activePoolAddress,
-        address _cakeMinerAddress
+        address _activePoolAddress
     )
         external
         override
@@ -46,23 +49,23 @@ contract CollSurplusPool is OwnableUpgradeable, CheckContract, ICollSurplusPool 
     {
         require(borrowerOperationsAddress == address(0), "address has already been set");
 
+        checkContract(_assetConfigManagerAddress);
         checkContract(_borrowerOperationsAddress);
         checkContract(_liquidatorOperationsAddress);
         checkContract(_redeemerOperationsAddress);
         checkContract(_activePoolAddress);
-        checkContract(_cakeMinerAddress);
 
+        assetConfigManager = IAssetConfigManager(_assetConfigManagerAddress);
         borrowerOperationsAddress = _borrowerOperationsAddress;
         liquidatorOperationsAddress = _liquidatorOperationsAddress;
         redeemerOperationsAddress = _redeemerOperationsAddress;
         activePoolAddress = _activePoolAddress;
-        cakeMinerAddress = _cakeMinerAddress;
 
+        emit AssetConfigManagerAddressChanged(_assetConfigManagerAddress);
         emit BorrowerOperationsAddressChanged(_borrowerOperationsAddress);
         emit LiquidatorOperationsAddressChanged(_liquidatorOperationsAddress);
         emit RedeemerOperationsAddressChanged(_redeemerOperationsAddress);
         emit ActivePoolAddressChanged(_activePoolAddress);
-        emit CakeMinerAddressChanged(_cakeMinerAddress);
     }
 
     /* Returns the asset's balance at CollSurplusPool address.
@@ -102,7 +105,8 @@ contract CollSurplusPool is OwnableUpgradeable, CheckContract, ICollSurplusPool 
     }
 
     function increaseAssetBalance(address _asset, uint _amount) external override {
-        _requireCallerIsActivePoolorCakeMiner();
+        DataTypes.AssetConfig memory config = assetConfigManager.get(_asset);
+        _requireCallerIsActivePoolorFarmer(config.farmerAddress);
         assetBalances[_asset] = assetBalances[_asset].add(_amount);
 
         emit AssetBalanceUpdated(_asset, assetBalances[_asset]);
@@ -123,13 +127,13 @@ contract CollSurplusPool is OwnableUpgradeable, CheckContract, ICollSurplusPool 
             "CollSurplusPool: Caller is neither LiquidatorOperations nor RedeemerOperations");
     }
 
-    function _requireCallerIsActivePoolorCakeMiner() internal view {
+    function _requireCallerIsActivePoolorFarmer(address _farmerAddress) internal view {
         require(
-            msg.sender == activePoolAddress || msg.sender == cakeMinerAddress,
-            "CollSurplusPool: Caller is not Active Pool nor CakeMiner");
+            (_farmerAddress == address(0) && msg.sender == activePoolAddress) ||
+            (_farmerAddress != address(0) && msg.sender == _farmerAddress),
+            "CollSurplusPool: Caller is not Active Pool nor Farmer");
     }
 
     receive() external payable {
-        _requireCallerIsActivePoolorCakeMiner();
     }
 }

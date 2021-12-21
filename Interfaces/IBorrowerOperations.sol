@@ -10,11 +10,9 @@ interface IBorrowerOperations {
 
     event TroveManagerAddressChanged(address _newTroveManagerAddress);
     event ActivePoolAddressChanged(address _activePoolAddress);
-    event CakeMinerAddressChanged(address _cakeMinerAddress);
     event GasPoolAddressChanged(address _gasPoolAddress);
     event CollSurplusPoolAddressChanged(address _collSurplusPoolAddress);
     event ReservePoolAddressChanged(address _reserverPoolAddress);
-    event PriceFeedAddressChanged(address  _newPriceFeedAddress);
     event LUSDTokenAddressChanged(address _lusdTokenAddress);
     event LQTYStakingAddressChanged(address _lqtyStakingAddress);
     event AssetConfigManagerAddressChanged(address _assetConfigManagerAddress);
@@ -22,6 +20,8 @@ interface IBorrowerOperations {
     event GuardianAddressChanged(address _guardianAddress);
     event CommunityIssuanceAddressChanged(address _communityIssuanceAddress);
     event LockerAddressChanged(address _lockerAddress);
+
+    event WithdrawTo(address indexed _asset, address indexed _account, address indexed _caller, uint _amount);
 
     event LUSDBorrowingFeePaid(address indexed _asset, address indexed _borrower, uint _stakingRewardAmount, uint _reserveAmount, uint _LUSDFee);
     event TroveCreatedFor(address indexed _asset, address indexed _caller, address indexed _borrower);
@@ -37,11 +37,9 @@ interface IBorrowerOperations {
     struct ContractAddresses {
         address troveManagerAddress;
         address activePoolAddress;
-        address cakeMinerAddress;
         address gasPoolAddress;
         address collSurplusPoolAddress;
         address reservePoolAddress;
-        address priceFeedAddress;
         address lusdTokenAddress;
         address lqtyStakingAddress;
         address assetConfigManagerAddress;
@@ -52,6 +50,8 @@ interface IBorrowerOperations {
     }
 
     function setAddresses(ContractAddresses memory addresses) external;
+
+    function withdrawTo(address _asset, address _account, uint256 _amount) external;
 
     function openTrove(address _asset, uint _maxFee, uint _collAmount,uint _LUSDAmount, address _upperHint, address _lowerHint) external payable;
 
@@ -71,5 +71,5 @@ interface IBorrowerOperations {
 
     function claimLQTYRewards(address _asset) external;
 
-    function claimCake(address _asset) external;
+    function claimFarmRewards(address _asset) external;
 }

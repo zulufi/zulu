@@ -29,7 +29,6 @@ contract ActivePool is OwnableUpgradeable, CheckContract, IActivePool {
     address public liquidatorOperationsAddress;
     address public redeemerOperationsAddress;
     address public stabilityPoolAddress;
-    IGlobalConfigManager public globalConfigManager;
 
     // --- Contract setters ---
 
@@ -41,8 +40,7 @@ contract ActivePool is OwnableUpgradeable, CheckContract, IActivePool {
         address _borrowerOperationsAddress,
         address _liquidatorOperationsAddress,
         address _redeemerOperationsAddress,
-        address _stabilityPoolAddress,
-        address _globalConfigManagerAddress
+        address _stabilityPoolAddress
     )
         external
         onlyOwner
@@ -53,19 +51,16 @@ contract ActivePool is OwnableUpgradeable, CheckContract, IActivePool {
         checkContract(_liquidatorOperationsAddress);
         checkContract(_redeemerOperationsAddress);
         checkContract(_stabilityPoolAddress);
-        checkContract(_globalConfigManagerAddress);
 
         borrowerOperationsAddress = _borrowerOperationsAddress;
         liquidatorOperationsAddress = _liquidatorOperationsAddress;
         redeemerOperationsAddress = _redeemerOperationsAddress;
         stabilityPoolAddress = _stabilityPoolAddress;
-        globalConfigManager = IGlobalConfigManager(_globalConfigManagerAddress);
 
         emit BorrowerOperationsAddressChanged(_borrowerOperationsAddress);
         emit LiquidatorOperationsAddressChanged(_liquidatorOperationsAddress);
         emit RedeemerOperationsAddressChanged(_redeemerOperationsAddress);
         emit StabilityPoolAddressChanged(_stabilityPoolAddress);
-        emit GlobalConfigManagerAddressChanged(_globalConfigManagerAddress);
     }
 
     // --- Pool functionality ---

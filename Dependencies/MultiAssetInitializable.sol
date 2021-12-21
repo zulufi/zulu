@@ -8,6 +8,7 @@ import "./OwnableUpgradeable.sol";
 abstract contract MultiAssetInitializable is OwnableUpgradeable {
 
     mapping(address => bool) public initializedAssets;
+    mapping (address => uint) public assetInitTimes;
 
     modifier onlySupportedAsset(address asset) {
         require(initializedAssets[asset], "Asset not supported");
@@ -20,6 +21,7 @@ abstract contract MultiAssetInitializable is OwnableUpgradeable {
         require(!initializedAssets[asset], "Asset is already supported");
         initializedAssets[asset] = true;
         initializeAssetInternal(asset, data);
+        assetInitTimes[asset] = block.timestamp;
         emit AssetInitialized(asset);
     }
 

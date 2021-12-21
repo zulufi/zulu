@@ -7,7 +7,6 @@ interface IActivePool {
     event BorrowerOperationsAddressChanged(address _newBorrowerOperationsAddress);
     event LiquidatorOperationsAddressChanged(address _liquidatorOperationsAddress);
     event RedeemerOperationsAddressChanged(address _redeemerOperationsAddress);
-    event GlobalConfigManagerAddressChanged(address _globalConfigManagerAddress);
     event StabilityPoolAddressChanged(address _newStabilityPoolAddress);
 
     event AssetSent(address indexed _address, address indexed _to, uint _amount);

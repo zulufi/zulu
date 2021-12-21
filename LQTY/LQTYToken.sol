@@ -27,25 +27,23 @@ import "../Dependencies/Initializable.sol";
 *
 * 2) sendToLQTYStaking(): callable only by Liquity core contracts, which move LQTY tokens from user -> LQTYStaking contract.
 *
-* 3) Supply hard-capped at 100 million
+* 3) Supply hard-capped at 1 billion
 *
 * 4) CommunityIssuance and LockupContractFactory addresses are set at deployment
 *
-* 5) The contributor mining allocation of 10 million tokens is minted at deployment to an EOA
+* 5) The contributor mining allocation of 150 million tokens is minted at deployment to an EOA
 *
-* 6) The treasury allocation of 5 million tokens are minted at deployment to the Liquity treasury multisig
+* 6) The ido allocation of 50 million tokens are minted at deployment to the Liquity treasury multisig
 *
-* 7) The airdrop allocation of 2.5 million tokens are minted at deployment to the Liquity airdrop multisig
+* 7) The operational fund allocation of 170 million tokens are minted at deployment to the Liquity airdrop multisig
 *
-* 8) 40 million tokens are minted at deployment to the CommunityIssuance contract
+* 8) 450 million tokens are minted at deployment to the CommunityIssuance contract
 *
-* 9) The LP rewards allocation of 2.5 million tokens is minted at deployent to the Liquity LP multisig
+* 9) 130 million tokens are minted at deployment to the Liquity investor multisig
 *
-* 10) 13 million tokens are minted at deployment to the Liquity investor multisig
+* 10) 100 million tokens are minted at deployment to the Liquity team multisig
 *
-* 11) 27 million tokens are minted at deployment to the Liquity team multisig
-*
-* 12) Until 90 days from deployment:
+* 11) Until 90 days from deployment:
 * -Liquity team & investor multisig may only transfer() tokens to LockupContracts that have been deployed via & registered in the
 *  LockupContractFactory
 * -approve(), increaseAllowance(), decreaseAllowance() revert when called by the multisig
@@ -103,7 +101,6 @@ contract LQTYToken is CheckContract, ILQTYToken, Initializable {
     address public communityIssuanceAddress;
     ILQTYStaking public lqtyStaking;
 
-    uint internal lpRewardsEntitlement;
     uint internal communityIssuanceEntitlement;
 
     ILockupContractFactory public lockupContractFactory;
@@ -115,10 +112,9 @@ contract LQTYToken is CheckContract, ILQTYToken, Initializable {
         address _communityIssuanceAddress,
         address _lqtyStakingAddress,
         address _lockupFactoryAddress,
-        address _lpRewardsAddress,
         address _contributorMiningAddress,
-        address _treasuryAddress,
-        address _airdropAddress,
+        address _idoAddress,
+        address _operationalFundAddress,
         address _teamAddress,
         address _investorAddress
     )
@@ -147,21 +143,18 @@ contract LQTYToken is CheckContract, ILQTYToken, Initializable {
 
         // --- Initial LQTY allocations ---
 
-        _mint(_contributorMiningAddress, _1_MILLION.mul(10)); // Allocate 10 million for contributor mining
-
-        communityIssuanceEntitlement = _1_MILLION.mul(40); // Allocate 40 million to the algorithmic issuance schedule
+        communityIssuanceEntitlement = _1_MILLION.mul(400); // Allocate 400 million to the algorithmic issuance schedule
         _mint(_communityIssuanceAddress, communityIssuanceEntitlement);
 
-        lpRewardsEntitlement = _1_MILLION.mul(25).div(10); // Allocate 2.5 million for LP rewards
-        _mint(_lpRewardsAddress, lpRewardsEntitlement);
+        _mint(_contributorMiningAddress, _1_MILLION.mul(150)); // Allocate 150 million for contributor mining
 
-        _mint(_treasuryAddress, _1_MILLION.mul(5)); // Allocate 5 million for treasury
+        _mint(_idoAddress, _1_MILLION.mul(50)); // Allocate 50 million for IDO
 
-        _mint(_airdropAddress, _1_MILLION.mul(25).div(10)); // Allocate 2.5 million for airdrop
+        _mint(_operationalFundAddress, _1_MILLION.mul(170)); // Allocate 170 million for operational fund
 
-        _mint(_investorAddress, _1_MILLION.mul(13)); // Allocate 13 million for investor
+        _mint(_investorAddress, _1_MILLION.mul(130)); // Allocate 130 million for investor
 
-        _mint(_teamAddress, _1_MILLION.mul(27)); // Allocate the remainder 27 million to the team
+        _mint(_teamAddress, _1_MILLION.mul(100)); // Allocate the remainder 100 million to the team
     }
 
     // --- External functions ---
@@ -192,10 +185,6 @@ contract LQTYToken is CheckContract, ILQTYToken, Initializable {
 
     function getDeploymentStartTime() external view override returns (uint256) {
         return deploymentStartTime;
-    }
-
-    function getLpRewardsEntitlement() external view override returns (uint256) {
-        return lpRewardsEntitlement;
     }
 
     function getCommunityIssuanceEntitlement() external view override returns (uint256) {
@@ -289,6 +278,7 @@ contract LQTYToken is CheckContract, ILQTYToken, Initializable {
                          _PERMIT_TYPEHASH, owner, spender, amount,
                          _nonces[owner]++, deadline))));
         address recoveredAddress = ecrecover(digest, v, r, s);
+        require(recoveredAddress != address(0), "LQTY ECDSA: invalid signature");
         require(recoveredAddress == owner, 'LQTY: invalid signature');
         _approve(owner, spender, amount);
     }
@@ -413,9 +403,8 @@ contract LQTYToken is CheckContract, ILQTYToken, Initializable {
             "LQTY: Cannot transfer tokens directly to the LQTY token contract or the zero address"
         );
         require(
-            _recipient != communityIssuanceAddress &&
             _recipient != address(lqtyStaking),
-            "LQTY: Cannot transfer tokens directly to the community issuance or staking contract"
+            "LQTY: Cannot transfer tokens directly to the staking contract"
         );
     }
 

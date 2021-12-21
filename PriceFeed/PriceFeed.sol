@@ -123,6 +123,9 @@ contract PriceFeed is CheckContract, MultiAssetInitializable, IPriceFeed {
         uint256 _anchorToleranceMantissa,
         uint256 _anchorPeriod
     ) external onlyOwner {
+
+        require(address(assetConfigManager) == address(0), "address has already been set");
+
         checkContract(_assetConfigManagerAddress);
 
         assetConfigManager = IAssetConfigManager(_assetConfigManagerAddress);
@@ -176,7 +179,13 @@ contract PriceFeed is CheckContract, MultiAssetInitializable, IPriceFeed {
      * @param token The token address to fetch the price of
      * @return Price denominated in USD, with 18 decimals
      */
-    function getPrice(address token) external view override onlySupportedAsset(token) returns (uint256) {
+    function getPrice(address token)
+        external
+        view
+        override
+        onlySupportedAsset(token)
+        returns (uint256)
+    {
         return prices[token];
     }
 
@@ -247,7 +256,7 @@ contract PriceFeed is CheckContract, MultiAssetInitializable, IPriceFeed {
      */
     function currentCumulativePrice(TokenConfig memory config) internal view returns (uint256) {
         (uint256 cumulativePrice0, uint256 cumulativePrice1, ) = UniswapV2OracleLibrary
-        .currentCumulativePrices(config.uniswapPair);
+            .currentCumulativePrices(config.uniswapPair);
         if (config.isUniswapReversed) {
             return cumulativePrice1;
         } else {
@@ -303,9 +312,9 @@ contract PriceFeed is CheckContract, MultiAssetInitializable, IPriceFeed {
         //             = priceAverage * conversionFactor * tokenBaseUnit / ethBaseUnit
         //             = unscaledPriceMantissa / expScale * tokenBaseUnit / ethBaseUnit
         anchorPrice = unscaledPriceMantissa
-        .mul(10**uint256(config.decimals))
-        .div(10**uint256(config.pairTokenDecimals))
-        .div(expScale);
+            .mul(10**uint256(config.decimals))
+            .div(10**uint256(config.pairTokenDecimals))
+            .div(expScale);
 
         emit UniswapPriceUpdated(config.token, anchorPrice, oldTimestamp, block.timestamp);
 
@@ -337,6 +346,7 @@ contract PriceFeed is CheckContract, MultiAssetInitializable, IPriceFeed {
                 block.timestamp,
                 cumulativePrice
             );
+            return (cumulativePrice, cumulativePrice, block.timestamp);
         } else {
             // Update new and old observations if elapsed time is greater than or equal to anchor period
             uint256 timeElapsed = block.timestamp - newObservation.timestamp;

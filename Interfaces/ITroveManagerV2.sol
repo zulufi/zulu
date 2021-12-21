@@ -37,7 +37,6 @@ interface ITroveManagerV2 {
     event LiquidatorOperationsAddressChanged(address _liquidatorOperationsAddress);
     event RedeemerOperationsAddressChanged(address _RedeemerOperationsAddress);
     event SortedTrovesAddressChanged(address _sortedTrovesAddress);
-    event CakeMinerAddressChanged(address _cakeMinerAddress);
     event AssetConfigManagerAddressChanged(address _assetConfigManagerAddress);
     event GlobalConfigManagerAddressChanged(address _globalConfigManagerAddress);
     event CommunityIssuanceAddressChanged(address _globalConfigManagerAddress);
@@ -53,12 +52,13 @@ interface ITroveManagerV2 {
     event ApplyDebtRewards(address indexed _asset, address indexed _borrower, uint _pendingNormalizedDebt, uint _newNormalizedDebt);
     event DebtRewardSnapshotUpdated(address indexed _asset, address indexed _borrower, uint _L_LUSDDebt);
     event L_LQTYRewardsUpdated(address indexed _asset, uint _L_LQTYReward);
-    event ApplyLQTYRewards(address indexed _asset, address indexed _borrower, uint _appliedRewards);
-    event IssueLQTYRewards(address indexed _asset, address indexed _borrower, uint _issuedRewards);
     event LQTYRewardSnapshotUpdated(address indexed _asset, address indexed _borrower, uint _L_LQTYReward);
     event TroveIndexUpdated(address indexed _asset, address _borrower, uint _newIndex);
     event DebtRUpdated(address indexed _asset, uint _newRate, uint _newR);
     event LUSDInterestMinted(address indexed _asset, uint _amount);
+
+    event LiquidityRewardSpeedUpdated(address _asset, uint _speed);
+    event L_SnapshotUpdated(address _asset, uint _lastTimestamp);
 
     // --- Functions ---
 
@@ -67,7 +67,6 @@ interface ITroveManagerV2 {
         address _liquidatorOperationsAddress,
         address _redeemerOperationsAddress,
         address _sortedTrovesAddress,
-        address _cakeMinerAddress,
         address _assetConfigManagerAddress,
         address _globalConfigManagerAddress,
         address _communityIssuanceAddress,
@@ -104,14 +103,17 @@ interface ITroveManagerV2 {
     function closeTrove(
         address _borrower,
         address _asset,
-        uint _price,
         uint _redistributedColl,
         uint _redistributedDebt,
         Status _closedStatus,
         TroveOperations _operation
     ) external;
 
-    function issueLQTYRewards(address _borrower, address _asset) external returns (uint);
+    function updateLiquidityRewardSpeed(address _asset, uint _speed) external;
+
+    function getPendingLQTYRewards(address _borrower, address _asset) external view returns (uint);
+
+    function claimLQTYRewards(address _borrower, address _asset) external returns (uint);
 
     function getLastNTroveOwners(address _asset, uint _n) external view returns (address[] memory);
 

@@ -6,27 +6,11 @@ pragma experimental ABIEncoderV2;
 import "../LQTY/CommunityIssuance.sol";
 
 contract CommunityIssuanceTester is CommunityIssuance {
-    function obtainLQTY(uint _amount) external {
-        lqtyToken.transfer(msg.sender, _amount);
+    function obtainLQTY(address _account, uint _LQTYamount) external {
+        lqtyToken.transfer(_account, _LQTYamount);
     }
 
-    function unprotectedIssueStabilityLQTY(address _asset) external returns (uint) {
-        uint latestAccruedReward = _accrueStabilityLQTY(_asset);
-        if (latestAccruedReward > 0) {
-            accruedStabilityRewards[_asset] = 0;
-        }
-
-        emit StabilityLQTYIssued(_asset, latestAccruedReward);
-        return latestAccruedReward;
-    }
-
-    function unprotectedIssueLiquidityLQTY(address _asset) external returns (uint) {
-        uint latestAccruedReward = _accrueLiquidityLQTY(_asset);
-        if (latestAccruedReward > 0) {
-            accruedLiquidityRewards[_asset] = 0;
-        }
-
-        emit LiquidityLQTYIssued(_asset, latestAccruedReward);
-        return latestAccruedReward;
+    function requireEnoughSupply(uint _issued) public view {
+        _requireEnoughSupply(_issued);
     }
 }

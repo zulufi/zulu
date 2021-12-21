@@ -26,7 +26,6 @@ contract BorrowerWrappersScript is BorrowerOperationsScript, ETHTransferScript, 
 
     ITroveManagerV2 immutable troveManager;
     IStabilityPool immutable stabilityPool;
-    IPriceFeed immutable priceFeed;
     IERC20 immutable lusdToken;
     IERC20 immutable lqtyToken;
     ILQTYStaking immutable lqtyStaking;
@@ -37,7 +36,6 @@ contract BorrowerWrappersScript is BorrowerOperationsScript, ETHTransferScript, 
         address _troveManagerAddress,
         address _lqtyStakingAddress,
         address _stabilityPoolAddress,
-        address _priceFeedAddress,
         address _lusdTokenAddress,
         address _lqtyTokenAddress,
         address _assetConfigManagerAddress
@@ -51,9 +49,6 @@ contract BorrowerWrappersScript is BorrowerOperationsScript, ETHTransferScript, 
 
         checkContract(_stabilityPoolAddress);
         stabilityPool = IStabilityPool(_stabilityPoolAddress);
-
-        checkContract(_priceFeedAddress);
-        priceFeed = IPriceFeed(_priceFeedAddress);
 
         checkContract(_lusdTokenAddress);
         lusdToken = IERC20(_lusdTokenAddress);
@@ -86,7 +81,8 @@ contract BorrowerWrappersScript is BorrowerOperationsScript, ETHTransferScript, 
     }
 
     function _getNetLUSDAmount(address _asset, uint _collateral) internal returns (uint) {
-        uint price = priceFeed.fetchPrice(_asset);
+        DataTypes.AssetConfig memory config = assetConfigManager.get(_asset);
+        uint price = IPriceFeed(config.priceOracleAddress).fetchPrice(_asset);
         uint ICR = troveManager.getCurrentICR(address(this), _asset, price);
 
         uint LUSDAmount = _collateral.mul(price).div(ICR);

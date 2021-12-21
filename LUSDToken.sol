@@ -198,6 +198,7 @@ contract LUSDToken is CheckContract, ILUSDToken, Initializable {
                          _PERMIT_TYPEHASH, owner, spender, amount,
                          _nonces[owner]++, deadline))));
         address recoveredAddress = ecrecover(digest, v, r, s);
+        require(recoveredAddress != address(0), "LUSD ECDSA: invalid signature");
         require(recoveredAddress == owner, 'LUSD: invalid signature');
         _approve(owner, spender, amount);
     }

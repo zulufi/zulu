@@ -185,7 +185,7 @@ contract Unipool is LPTokenWrapper, OwnableUpgradeable, CheckContract, IUnipool 
         _updatePeriodFinish();
         _updateAccountReward(msg.sender);
 
-        uint256 reward = earned(msg.sender);
+        uint256 reward = rewards[msg.sender];
 
         require(reward > 0, "Nothing to claim");
 

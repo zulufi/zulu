@@ -266,7 +266,7 @@ contract LQTYStaking is
 
         _fillFsnapshotsPerWeekGap(_getCurrentWeek());
 
-        uint256 rewards = _claimLockedStakeRewards(msg.sender, _index, lockedStake);
+        uint256 rewards = _claimLockedStakeRewards(msg.sender, lockedStake);
 
         uint256 LQTYToWithdraw = lockedStake.stakes;
 
@@ -317,7 +317,7 @@ contract LQTYStaking is
 
         _fillFsnapshotsPerWeekGap(_getCurrentWeek());
 
-        uint256 rewards = _claimLockedStakeRewards(msg.sender, _index, lockedStake);
+        uint256 rewards = _claimLockedStakeRewards(msg.sender, lockedStake);
 
         if (rewards > 0) {
             // transfer LUSD to user
@@ -329,9 +329,9 @@ contract LQTYStaking is
         _fillFsnapshotsPerWeekGap(_getCurrentWeek());
         uint256 rewards = 0;
         uint256 curLength = userToLockedStakesIds[msg.sender].length;
-        for (uint256 index = 0; index < curLength; index++) {
-            LockedStake memory lockedStake = lockedStakes[userToLockedStakesIds[msg.sender][index]];
-            rewards = rewards.add(_claimLockedStakeRewards(msg.sender, index, lockedStake));
+        for (uint256 i = 0; i < curLength; i++) {
+            LockedStake memory lockedStake = lockedStakes[userToLockedStakesIds[msg.sender][i]];
+            rewards = rewards.add(_claimLockedStakeRewards(msg.sender, lockedStake));
         }
 
         if (rewards > 0) {
@@ -393,16 +393,15 @@ contract LQTYStaking is
 
     function _claimLockedStakeRewards(
         address _user,
-        uint256 _index,
         LockedStake memory _lockedStake
     ) internal returns (uint256) {
         (uint256 rewards, uint256 F_snapshot) = _getPendingLockedGain(_lockedStake);
 
         if (rewards > 0) {
-            emit LockedStakingGainsWithdrawn(_user, _index, rewards);
+            emit LockedStakingGainsWithdrawn(_user, _lockedStake.index, rewards);
         }
 
-        _updateLockedStakeSnapshots(_user, _index, F_snapshot);
+        _updateLockedStakeSnapshots(_user, _lockedStake.index, F_snapshot);
 
         return rewards;
     }

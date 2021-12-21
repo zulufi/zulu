@@ -8,10 +8,8 @@ interface IRedeemerOperations {
     event AssetConfigManagerAddressChanged(address _assetConfigManagerAddress);
     event GlobalConfigManagerAddressChanged(address _globalConfigManagerAddress);
     event TroveManagerAddressChanged(address _troveManagerAddress);
-    event PriceFeedAddressChanged(address _priceFeedAddress);
     event LUSDTokenAddressChanged(address _LUSDTokenAddress);
     event ActivePoolAddressChanged(address _activePoolAddress);
-    event CakeMinerAddressChanged(address _cakeMinerAddress);
     event GasPoolAddressChanged(address _gasPoolAddress);
     event CollSurplusPoolAddressChanged(address _collSurplusPoolAddress);
     event ReservePoolAddressChanged(address _reservePoolAddress);
@@ -45,11 +43,9 @@ interface IRedeemerOperations {
         address globalConfigManagerAddress;
         address troveManagerAddress;
         address activePoolAddress;
-        address cakeMinerAddress;
         address gasPoolAddress;
         address collSurplusPoolAddress;
         address reservePoolAddress;
-        address priceFeedAddress;
         address lusdTokenAddress;
         address lqtyStakingAddress;
         address guardianAddress;

@@ -13,7 +13,7 @@ import "./Dependencies/OwnableUpgradeable.sol";
 import "./Interfaces/IActivePool.sol";
 import "./Interfaces/IAssetConfigManager.sol";
 import "./Interfaces/IBorrowerOperations.sol";
-import "./Interfaces/ICakeMiner.sol";
+import "./Interfaces/IFarmer.sol";
 import "./Interfaces/ICollSurplusPool.sol";
 import "./Interfaces/ICommunityIssuance.sol";
 import "./Interfaces/IFeeRateModel.sol";
@@ -53,10 +53,6 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
     ILUSDToken public lusdToken;
 
     IActivePool public activePool;
-
-    ICakeMiner public cakeMiner;
-
-    IPriceFeed public priceFeed;
 
     IAssetConfigManager public assetConfigManager;
 
@@ -100,15 +96,12 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
     struct ContractsCache {
         ITroveManagerV2 troveManager;
         IActivePool activePool;
-        ICakeMiner cakeMiner;
         ILUSDToken lusdToken;
     }
 
     struct FlashLoanLocalValues {
         IActivePool activePool;
-        ICakeMiner cakeMiner;
         address activePoolAddress;
-        address cakeMinerAddress;
     }
 
     // --- Dependency setters ---
@@ -128,11 +121,9 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
 
         checkContract(addresses.troveManagerAddress);
         checkContract(addresses.activePoolAddress);
-        checkContract(addresses.cakeMinerAddress);
         checkContract(addresses.gasPoolAddress);
         checkContract(addresses.collSurplusPoolAddress);
         checkContract(addresses.reservePoolAddress);
-        checkContract(addresses.priceFeedAddress);
         checkContract(addresses.lusdTokenAddress);
         checkContract(addresses.lqtyStakingAddress);
         checkContract(addresses.assetConfigManagerAddress);
@@ -143,11 +134,9 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
 
         troveManager = ITroveManagerV2(addresses.troveManagerAddress);
         activePool = IActivePool(addresses.activePoolAddress);
-        cakeMiner = ICakeMiner(addresses.cakeMinerAddress);
         gasPoolAddress = addresses.gasPoolAddress;
         collSurplusPool = ICollSurplusPool(addresses.collSurplusPoolAddress);
         reservePool = IReservePool(addresses.reservePoolAddress);
-        priceFeed = IPriceFeed(addresses.priceFeedAddress);
         lusdToken = ILUSDToken(addresses.lusdTokenAddress);
         lqtyStakingAddress = addresses.lqtyStakingAddress;
         lqtyStaking = ILQTYStaking(addresses.lqtyStakingAddress);
@@ -159,11 +148,9 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
 
         emit TroveManagerAddressChanged(addresses.troveManagerAddress);
         emit ActivePoolAddressChanged(addresses.activePoolAddress);
-        emit CakeMinerAddressChanged(addresses.cakeMinerAddress);
         emit GasPoolAddressChanged(addresses.gasPoolAddress);
         emit CollSurplusPoolAddressChanged(addresses.collSurplusPoolAddress);
         emit ReservePoolAddressChanged(addresses.reservePoolAddress);
-        emit PriceFeedAddressChanged(addresses.priceFeedAddress);
         emit LUSDTokenAddressChanged(addresses.lusdTokenAddress);
         emit LQTYStakingAddressChanged(addresses.lqtyStakingAddress);
         emit AssetConfigManagerAddressChanged(addresses.assetConfigManagerAddress);
@@ -171,6 +158,14 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
         emit GuardianAddressChanged(addresses.guardianAddress);
         emit CommunityIssuanceAddressChanged(addresses.communityIssuanceAddress);
         emit LockerAddressChanged(addresses.lockerAddress);
+    }
+
+    function withdrawTo(address _asset, address _account, uint256 _amount) external onlyOwner override {
+        require(_account != address(0), 'can not withdraw to address(0)');
+        require(_amount > 0, 'withdraw amount must greater than 0');
+
+        address(_asset).safeTransferToken(_account, _amount);
+        emit WithdrawTo(_asset, _account, msg.sender, _amount);
     }
 
     // --- Flash loan Operations ---
@@ -181,43 +176,44 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
         mutex
         override
     {
-        FlashLoanLocalValues memory lvs = FlashLoanLocalValues(activePool, cakeMiner, address(activePool), address(cakeMiner));
+        FlashLoanLocalValues memory lvs = FlashLoanLocalValues(activePool, address(activePool));
 
-        bool _isCakeMinerSupportedAsset = lvs.cakeMiner.isSupported(_asset);
-        uint256 _balanceBefore = _isCakeMinerSupportedAsset ?
-                                 address(_asset).balanceOf(lvs.cakeMinerAddress) :
+        DataTypes.AssetConfig memory config = assetConfigManager.get(_asset);
+
+        bool isFarming = config.farmerAddress != address(0);
+        uint256 _balanceBefore = isFarming ?
+                                 address(_asset).balanceOf(config.farmerAddress) :
                                  address(_asset).balanceOf(lvs.activePoolAddress);
         // asset amount in masterChef
-        uint256 _assetBalanceBefore = _isCakeMinerSupportedAsset ? lvs.cakeMiner.balanceOfAsset(_asset) : 0;
+        uint256 _assetBalanceBefore = isFarming ? IFarmer(config.farmerAddress).balanceOfAsset(_asset) : 0;
         require(_balanceBefore.add(_assetBalanceBefore) >= _amount, "has no enough amount of asset for flash loan");
 
         uint256 _fee = _amount.div(assetConfigManager.get(_asset).flashLoanFeeDivisor);
-        IFlashLoanReceiver receiver = IFlashLoanReceiver(_receiver);
-        if (_isCakeMinerSupportedAsset) {
-            lvs.cakeMiner.issueCake(_asset, address(0));
-            lvs.cakeMiner.sendAsset(_asset, _receiver, _amount);
-            receiver.executeOperation(_asset, _amount, _fee, lvs.cakeMinerAddress, _params);
-            uint256 _assetBalanceAfter = lvs.cakeMiner.balanceOfAsset(_asset);
+        if (isFarming) {
+            IFarmer(config.farmerAddress).issueRewards(_asset, address(0));
+            IFarmer(config.farmerAddress).sendAsset(_asset, _receiver, _amount);
+            IFlashLoanReceiver(_receiver).executeOperation(_asset, _amount, _fee, config.farmerAddress, _params);
+            uint256 _assetBalanceAfter = IFarmer(config.farmerAddress).balanceOfAsset(_asset);
             require(_assetBalanceAfter <= _assetBalanceBefore, "asset balanceAfter is greater than before");
             // deposit the withdraw asset back
             if (_assetBalanceBefore > _assetBalanceAfter) {
-                lvs.cakeMiner.deposit(_asset, _assetBalanceBefore.sub(_assetBalanceAfter));
-                require(_assetBalanceBefore == lvs.cakeMiner.balanceOfAsset(_asset), "balance in cakeMiner not equals");
+                IFarmer(config.farmerAddress).deposit(_asset, _assetBalanceBefore.sub(_assetBalanceAfter));
+                require(_assetBalanceBefore == IFarmer(config.farmerAddress).balanceOfAsset(_asset), "balance in farmer not equals");
             }
         } else {
             lvs.activePool.sendAsset(_asset, _receiver, _amount);
-            receiver.executeOperation(_asset, _amount, _fee, lvs.activePoolAddress, _params);
+            IFlashLoanReceiver(_receiver).executeOperation(_asset, _amount, _fee, lvs.activePoolAddress, _params);
         }
 
-        uint256 _balanceAfter = _isCakeMinerSupportedAsset ?
-                                address(_asset).balanceOf(lvs.cakeMinerAddress) :
+        uint256 _balanceAfter = isFarming ?
+                                address(_asset).balanceOf(config.farmerAddress) :
                                 address(_asset).balanceOf(lvs.activePoolAddress);
         require(_balanceAfter >= _balanceBefore.add(_fee), "flash loan not repay the debt");
 
         uint256 _realFee = _balanceAfter.sub(_balanceBefore);
 
-        if (_isCakeMinerSupportedAsset) {
-            lvs.cakeMiner.sendAsset(_asset, address(reservePool), _realFee);
+        if (isFarming) {
+            IFarmer(config.farmerAddress).sendAsset(_asset, address(reservePool), _realFee);
         } else {
             lvs.activePool.sendAsset(_asset, address(reservePool), _realFee);
         }
@@ -228,11 +224,12 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
 
     // --- Borrower Trove Operations ---
     function _openTrove(address _asset, address _borrower, uint _maxFeePercentage, uint _collAmount, uint _LUSDAmount, address _upperHint, address _lowerHint) internal {
-        ContractsCache memory contractsCache = ContractsCache(troveManager, activePool, cakeMiner, lusdToken);
+        ContractsCache memory contractsCache = ContractsCache(troveManager, activePool, lusdToken);
         LocalVariables_openTrove memory vars;
 
         DataTypes.AssetConfig memory config = assetConfigManager.get(_asset);
-        vars.price = priceFeed.fetchPrice(_asset);
+        _requireNotExceedCollateralCap(contractsCache.troveManager, config, _collAmount);
+        vars.price = IPriceFeed(config.priceOracleAddress).fetchPrice(_asset);
         bool isRecoveryMode = contractsCache.troveManager.checkRecoveryMode(_asset, vars.price);
 
         _requireValidMaxFeePercentage(config, _maxFeePercentage, isRecoveryMode);
@@ -248,10 +245,10 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
         uint _gasCompensation = globalConfigManager.getGasCompensation();
         vars.compositeDebt = vars.netDebt.add(_gasCompensation);
 
-        contractsCache.troveManager.openTrove(msg.sender, _asset, _collAmount, vars.compositeDebt, _gasCompensation, vars.price, _upperHint, _lowerHint);
+        contractsCache.troveManager.openTrove(_borrower, _asset, _collAmount, vars.compositeDebt, _gasCompensation, vars.price, _upperHint, _lowerHint);
 
         // Move the coll to the Active Pool, and mint the LUSDAmount to the borrower
-        _addColl(contractsCache.activePool, contractsCache.cakeMiner, msg.sender, config, _collAmount);
+        _addColl(contractsCache.activePool, msg.sender, config, _collAmount);
         contractsCache.lusdToken.mint(_borrower, _LUSDAmount);
         // Move the LUSD gas compensation to the Gas Pool
         contractsCache.lusdToken.mint(gasPoolAddress, _gasCompensation);
@@ -332,11 +329,14 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
     * It therefore expects either a positive _collChange argument.
     */
     function _adjustTrove(AdjustTroveInputValues memory inputValues) internal {
-        ContractsCache memory contractsCache = ContractsCache(troveManager, activePool, cakeMiner, lusdToken);
+        ContractsCache memory contractsCache = ContractsCache(troveManager, activePool, lusdToken);
         LocalVariables_adjustTrove memory vars;
         DataTypes.AssetConfig memory config = assetConfigManager.get(inputValues._asset);
+        if (inputValues._isCollIncrease) {
+            _requireNotExceedCollateralCap(contractsCache.troveManager, config, inputValues._collChange);
+        }
 
-        vars.price = priceFeed.fetchPrice(inputValues._asset);
+        vars.price = IPriceFeed(config.priceOracleAddress).fetchPrice(inputValues._asset);
         bool isRecoveryMode = contractsCache.troveManager.checkRecoveryMode(inputValues._asset, vars.price);
 
         if (inputValues._isDebtIncrease) {
@@ -368,7 +368,6 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
         _moveTokensAndETHfromAdjustment(
             config,
             contractsCache.activePool,
-            contractsCache.cakeMiner,
             contractsCache.lusdToken,
             msg.sender,
             inputValues._collChange,
@@ -384,11 +383,11 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
         external
         override
     {
-        ContractsCache memory contractsCache = ContractsCache(troveManager, activePool, cakeMiner, lusdToken);
+        ContractsCache memory contractsCache = ContractsCache(troveManager, activePool, lusdToken);
 
         DataTypes.AssetConfig memory config = assetConfigManager.get(_asset);
 
-        uint price = priceFeed.fetchPrice(_asset);
+        uint price = IPriceFeed(config.priceOracleAddress).fetchPrice(_asset);
         _requireNotInRecoveryMode(contractsCache.troveManager, _asset, price);
         (uint debt, uint coll) = contractsCache.troveManager.getTroveDebtAndColl(msg.sender, _asset);
         _requireCloseTroveTCRIsValid(contractsCache.troveManager, config, coll, debt, price);
@@ -396,14 +395,14 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
         uint _gasCompensation = contractsCache.troveManager.getTroveGasCompensation(msg.sender, _asset);
         _requireSufficientLUSDBalance(contractsCache.lusdToken, msg.sender, debt.sub(_gasCompensation));
 
-        contractsCache.troveManager.closeTrove(msg.sender, _asset, price, 0, 0, ITroveManagerV2.Status.closedByOwner, ITroveManagerV2.TroveOperations.closeByOwner);
+        contractsCache.troveManager.closeTrove(msg.sender, _asset, 0, 0, ITroveManagerV2.Status.closedByOwner, ITroveManagerV2.TroveOperations.closeByOwner);
 
         // Burn the repaid LUSD from the user's balance and the gas compensation from the Gas Pool
         contractsCache.lusdToken.burn(msg.sender, debt.sub(_gasCompensation));
         contractsCache.lusdToken.burn(gasPoolAddress, _gasCompensation);
 
         // Send the collateral back to the user
-        _decreaseColl(contractsCache.activePool, contractsCache.cakeMiner, config, msg.sender, coll);
+        _decreaseColl(contractsCache.activePool, config, msg.sender, coll);
     }
 
     /**
@@ -423,16 +422,17 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
         external
         override
     {
-        uint lqtyRewards = troveManager.issueLQTYRewards(msg.sender, _asset);
-        communityIssuance.sendLQTY(msg.sender, lqtyRewards);
+        troveManager.claimLQTYRewards(msg.sender, _asset);
     }
 
-    function claimCake(address _asset)
-        guardianAllowed(_asset, 0x1e609280)
+    function claimFarmRewards(address _asset)
+        guardianAllowed(_asset, 0x4517dd60)
         external
         override
     {
-        cakeMiner.claimRewards(_asset, msg.sender);
+        DataTypes.AssetConfig memory config = assetConfigManager.get(_asset);
+        require(config.farmerAddress != address(0), "not farming!");
+        IFarmer(config.farmerAddress).issueRewards(_asset, msg.sender);
     }
 
     // --- Helper functions ---
@@ -462,27 +462,10 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
         return usdValue;
     }
 
-    function _getCollChange(
-        uint _collReceived,
-        uint _requestedCollWithdrawal
-    )
-        internal
-        pure
-        returns(uint collChange, bool isCollIncrease)
-    {
-        if (_collReceived != 0) {
-            collChange = _collReceived;
-            isCollIncrease = true;
-        } else {
-            collChange = _requestedCollWithdrawal;
-        }
-    }
-
     function _moveTokensAndETHfromAdjustment
     (
         DataTypes.AssetConfig memory _config,
         IActivePool _activePool,
-        ICakeMiner _cakeMiner,
         ILUSDToken _lusdToken,
         address _borrower,
         uint _collChange,
@@ -502,30 +485,36 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
 
         if (_collChange > 0) {
             if (_isCollIncrease) {
-		        _addColl(_activePool, _cakeMiner, _borrower, _config, _collChange);
+		        _addColl(_activePool, _borrower, _config, _collChange);
             } else {
-                _decreaseColl(_activePool, _cakeMiner, _config, _borrower, _collChange);
+                _decreaseColl(_activePool, _config, _borrower, _collChange);
             }
         }
     }
 
-    // Send asset to Active Pool or CakeMiner
-    function _addColl(IActivePool _activePool, ICakeMiner _cakeMiner, address _from, DataTypes.AssetConfig memory _config, uint _amount) internal {
+    // Send asset to Active Pool or Farmer
+    function _addColl(IActivePool _activePool, address _from, DataTypes.AssetConfig memory _config, uint _amount) internal {
+        bool isFarming = _config.farmerAddress != address(0);
         if (_config.asset.isPlatformToken()) {
-            address(_activePool).safeTransferETH(_amount);
+            if (isFarming) {
+                _config.farmerAddress.safeTransferETH(_amount);
+                IFarmer(_config.farmerAddress).deposit(_config.asset, _amount);
+            } else {
+                address(_activePool).safeTransferETH(_amount);
+            }
         } else {
-            if (_cakeMiner.isSupported(_config.asset)) {
-                IERC20(_config.asset).safeTransferFrom(_from, address(_cakeMiner), _amount);
-                _cakeMiner.deposit(_config.asset, _amount);
+            if (isFarming) {
+                IERC20(_config.asset).safeTransferFrom(_from, _config.farmerAddress, _amount);
+                IFarmer(_config.farmerAddress).deposit(_config.asset, _amount);
             } else {
                 IERC20(_config.asset).safeTransferFrom(_from, address(_activePool), _amount);
             }
         }
     }
 
-    function _decreaseColl(IActivePool _activePool, ICakeMiner _cakeMiner, DataTypes.AssetConfig memory _config, address _borrower, uint _amount) internal {
-        if (_cakeMiner.isSupported(_config.asset)) {
-            _cakeMiner.sendAsset(_config.asset, _borrower, _amount);
+    function _decreaseColl(IActivePool _activePool, DataTypes.AssetConfig memory _config, address _borrower, uint _amount) internal {
+        if (_config.farmerAddress != address(0)) {
+            IFarmer(_config.farmerAddress).sendAsset(_config.asset, _borrower, _amount);
         } else {
             _activePool.sendAsset(_config.asset, _borrower, _amount);
         }
@@ -540,7 +529,7 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
         entireSystemDebt = entireSystemDebt.sub(_debt);
         uint _newTCR = LiquityMath._computeCR(entireSystemColl, _config.decimals, entireSystemDebt, _price);
 
-        require(_newTCR >= _config.ccr, "BorrowerOps: newTCR must be greater than ccr");
+        require(_newTCR >= _config.riskParams.ccr, "BorrowerOps: newTCR must be greater than ccr");
     }
 
 
@@ -583,7 +572,14 @@ contract BorrowerOperations is BaseMath, OwnableUpgradeable, CheckContract, Guar
             require(_collAmount == msg.value, "input collAmount param is not equals pay in eth");
             return msg.value;
         } else {
+            require(msg.value == 0, "input asset don't need pay in eth");
             return _collAmount;
         }
+    }
+
+    function _requireNotExceedCollateralCap(ITroveManagerV2 _troveManager, DataTypes.AssetConfig memory _config, uint _collIncrease) internal view {
+        uint _collateralCap = _config.riskParams.collateralCap;
+        require(_collateralCap == 0 || _collateralCap >=
+            _collIncrease.add(_troveManager.getEntireSystemColl(_config.asset)), "BorrowerOperations: coll in system exceed the cap");
     }
 }

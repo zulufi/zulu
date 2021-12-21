@@ -108,10 +108,10 @@ contract AssetConfigManager is IAssetConfigManager, OwnableUpgradeable, CheckCon
         }
 
         // check mcr
-        require(config.mcr > ONE_HUNDRED_PCT, "invalid mcr");
+        require(config.riskParams.mcr > ONE_HUNDRED_PCT, "invalid mcr");
 
         // check ccr
-        require(config.ccr > ONE_HUNDRED_PCT, "invalid ccr");
+        require(config.riskParams.ccr > ONE_HUNDRED_PCT, "invalid ccr");
 
         // check liquidation bonus
         require(config.liquidationBonusDivisor >= 10, "invalid liquidation bonus divisor");
@@ -120,7 +120,7 @@ contract AssetConfigManager is IAssetConfigManager, OwnableUpgradeable, CheckCon
         require(config.reserveFactor >= 0 && config.reserveFactor < ONE_HUNDRED_PCT, "invalid reserve factor");
 
         // check min debt
-        require(config.minDebt > 0, "invalid min debt");
+        require(config.riskParams.minDebt > 0, "invalid min debt");
 
         // check flash loan fee
         require(config.flashLoanFeeDivisor >= 2, "invalid flash loan fee divisor");
@@ -137,6 +137,8 @@ contract AssetConfigManager is IAssetConfigManager, OwnableUpgradeable, CheckCon
         require(config.feeRateParams.redeemFeeRateFloor > 0 && config.feeRateParams.redeemFeeRateFloor < ONE_HUNDRED_PCT, "invalid redeem fee rate floor");
         require(config.feeRateParams.redeemFeeRateCeil > 0 && config.feeRateParams.redeemFeeRateCeil < ONE_HUNDRED_PCT, "invalid redeem fee rate ceil");
         require(config.feeRateParams.redeemFeeRateFloor < config.feeRateParams.redeemFeeRateCeil, "redeemFeeRateFloor >= redeemFeeRateCeil");
+
+        require(config.farmerAddress == address(0) || isContract(config.farmerAddress), "invalid farmer address");
     }
 
 }

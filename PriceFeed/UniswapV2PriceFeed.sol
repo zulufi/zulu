@@ -51,7 +51,7 @@ contract UniswapV2PriceFeed is MultiAssetInitializable, CheckContract, IPriceFee
     /**
      * @param _maxPriceDeviation Threshold of spot prices deviation: 10ˆ16 represents a 1% deviation.
      */
-    function setParams(uint256 _maxPriceDeviation) public {
+    function setParams(uint256 _maxPriceDeviation) external onlyOwner {
         require(_maxPriceDeviation < Math.BONE, "ERR_INVALID_PRICE_DEVIATION");
 
         maxPriceDeviation = _maxPriceDeviation;
@@ -205,8 +205,8 @@ contract UniswapV2PriceFeed is MultiAssetInitializable, CheckContract, IPriceFee
                 uint256 rootK = Math.bsqrt(uint256(reserve_0).mul(reserve_1), false);
                 uint256 rootKLast = Math.bsqrt(kLast, false);
                 if (rootK > rootKLast) {
-                    uint256 numerator = totalSupply.mul(rootK.sub(rootKLast));
-                    uint256 denominator = rootK.mul(5).add(rootKLast);
+                    uint256 numerator = totalSupply.mul(rootK.sub(rootKLast)).mul(8);
+                    uint256 denominator = rootK.mul(17).add(rootKLast.mul(8));
                     uint256 liquidity = numerator / denominator;
                     totalSupply = totalSupply.add(liquidity);
                 }

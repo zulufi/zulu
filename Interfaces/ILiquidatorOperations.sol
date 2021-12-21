@@ -11,10 +11,8 @@ interface ILiquidatorOperations {
     }
 
     event TroveManagerAddressChanged(address _troveManagerAddress);
-    event PriceFeedAddressChanged(address _newPriceFeedAddress);
     event LUSDTokenAddressChanged(address _newLUSDTokenAddress);
     event ActivePoolAddressChanged(address _activePoolAddress);
-    event CakeMinerAddressChanged(address _cakeMinerAddress);
     event StabilityPoolAddressChanged(address _stabilityPoolAddress);
     event GasPoolAddressChanged(address _gasPoolAddress);
     event CollSurplusPoolAddressChanged(address _collSurplusPoolAddress);
@@ -29,9 +27,7 @@ interface ILiquidatorOperations {
 
     struct ContractAddresses {
         address troveManagerAddress;
-        address priceFeedAddress;
         address activePoolAddress;
-        address cakeMinerAddress;
         address stabilityPoolAddress;
         address gasPoolAddress;
         address collSurplusPoolAddress;

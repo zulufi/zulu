@@ -90,7 +90,7 @@ contract HintHelpers is BaseMath, OwnableUpgradeable, CheckContract {
 
     function getRedemptionHints(
         address _asset,
-        uint _LUSDamount, 
+        uint _LUSDamount,
         uint _price,
         uint _maxIterations
     )
@@ -104,7 +104,7 @@ contract HintHelpers is BaseMath, OwnableUpgradeable, CheckContract {
         uint remainingLUSD = _LUSDamount;
 
         if (_maxIterations == 0) {
-            _maxIterations = LiquityMath._min(remainingLUSD.div(_config.minDebt).add(1), troveManagerCached.getTroveOwnersCount(_asset));
+            _maxIterations = LiquityMath._min(remainingLUSD.div(_config.riskParams.minDebt).add(1), troveManagerCached.getTroveOwnersCount(_asset));
         }
 
         address[] memory troveArray = troveManagerCached.getLastNTrovesAboveMCR(
@@ -128,8 +128,8 @@ contract HintHelpers is BaseMath, OwnableUpgradeable, CheckContract {
             uint256 netLUSDDebt = singleRedemption.debt.sub(singleRedemption.gasCompensation);
 
             if (netLUSDDebt > remainingLUSD) {
-                if (netLUSDDebt > _config.minDebt) {
-                    uint maxRedeemableLUSD = LiquityMath._min(remainingLUSD, netLUSDDebt.sub(_config.minDebt));
+                if (netLUSDDebt > _config.riskParams.minDebt) {
+                    uint maxRedeemableLUSD = LiquityMath._min(remainingLUSD, netLUSDDebt.sub(_config.riskParams.minDebt));
 
                     singleRedemption.newColl = singleRedemption.coll.sub(LiquityMath._scaleToCollDecimals(
                         maxRedeemableLUSD.mul(DECIMAL_PRECISION).div(_price), _config.decimals));
@@ -152,13 +152,13 @@ contract HintHelpers is BaseMath, OwnableUpgradeable, CheckContract {
         hints.truncatedLUSDamount = _LUSDamount.sub(remainingLUSD);
     }
 
-    /* getApproxHint() - return address of a Trove that is, on average, (length / numTrials) positions away in the 
-    sortedTroves list from the correct insert position of the Trove to be inserted. 
-    
-    Note: The output address is worst-case O(n) positions away from the correct insert position, however, the function 
+    /* getApproxHint() - return address of a Trove that is, on average, (length / numTrials) positions away in the
+    sortedTroves list from the correct insert position of the Trove to be inserted.
+
+    Note: The output address is worst-case O(n) positions away from the correct insert position, however, the function
     is probabilistic. Input can be tuned to guarantee results to a high degree of confidence, e.g:
 
-    Submitting numTrials = k * sqrt(length), with k = 15 makes it very, very likely that the ouput address will 
+    Submitting numTrials = k * sqrt(length), with k = 15 makes it very, very likely that the ouput address will
     be <= sqrt(length) positions away from the correct insert position.
     */
     function getApproxHint(address _asset, uint _CR, uint _numTrials, uint _inputRandomSeed)

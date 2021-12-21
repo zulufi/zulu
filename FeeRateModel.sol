@@ -5,7 +5,6 @@ pragma experimental ABIEncoderV2;
 
 import "./Interfaces/IAssetConfigManager.sol";
 import "./Interfaces/IFeeRateModel.sol";
-import "./Interfaces/IPriceFeed.sol";
 import "./Interfaces/ILUSDToken.sol";
 import "./Dependencies/BaseMath.sol";
 import "./Dependencies/OwnableUpgradeable.sol";
@@ -166,10 +165,10 @@ contract FeeRateModel is OwnableUpgradeable, CheckContract, BaseMath, IFeeRateMo
     }
 
     function trialCalcRedeemRate(address asset, uint price, uint redeemAmount) external view returns(uint) {
-        uint baseRate = _calcBaseRateFromRedemption(price, redeemAmount);
+        uint _baseRate = _calcBaseRateFromRedemption(price, redeemAmount);
         DataTypes.AssetConfig memory config = configManager.get(asset);
         return LiquityMath._min(
-            config.feeRateParams.redeemFeeRateFloor.add(baseRate),
+            config.feeRateParams.redeemFeeRateFloor.add(_baseRate),
             config.feeRateParams.redeemFeeRateCeil
         );
     }

@@ -47,9 +47,7 @@ interface IStabilityPool is IPayablePool {
     event RedeemerOperationsAddressChanged(address _redeemerOperationsAddress);
     event TroveManagerAddressChanged(address _newTroveManagerAddress);
     event ActivePoolAddressChanged(address _newActivePoolAddress);
-    event CakeMinerAddressChanged(address _cakeMinerAddress);
     event LUSDTokenAddressChanged(address _newLUSDTokenAddress);
-    event PriceFeedAddressChanged(address _newPriceFeedAddress);
     event CommunityIssuanceAddressChanged(address _newCommunityIssuanceAddress);
     event AssetConfigManagerAddressChanged(address _newAssetConfigManagerAddress);
     event GuardianAddressChanged(address _guardianAddress);
@@ -72,6 +70,9 @@ interface IStabilityPool is IPayablePool {
     event LQTYPaidToDepositor(address indexed _asset, address indexed _depositor, uint _LQTY);
     event AssetSent(address indexed _asset, address indexed _to, uint _amount);
 
+    event StabilityRewardSpeedUpdated(address _asset, uint _speed);
+    event S_SnapshotUpdated(address _asset, uint _lastTimestamp);
+
     // --- Functions ---
 
     /*
@@ -84,14 +85,14 @@ interface IStabilityPool is IPayablePool {
         address _redeemerOperationsAddress,
         address _troveManagerAddress,
         address _activePoolAddress,
-        address _cakeMinerAddress,
         address _lusdTokenAddress,
-        address _priceFeedAddress,
         address _communityIssuanceAddress,
         address _assetConfigManagerAddress,
         address _guardianAddress,
         address _lockerAddress
     ) external;
+
+    function updateStabilityRewardSpeed(address _asset, uint _speed) external;
 
     /*
      * Initial checks:

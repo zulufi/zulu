@@ -8,12 +8,11 @@ interface ICollSurplusPool is IPayablePool {
 
     // --- Events ---
 
+    event AssetConfigManagerAddressChanged(address _assetConfigManagerAddress);
     event BorrowerOperationsAddressChanged(address _newBorrowerOperationsAddress);
     event LiquidatorOperationsAddressChanged(address _liquidatorOperationsAddress);
     event RedeemerOperationsAddressChanged(address _redeemerOperationsAddress);
-    event TroveManagerAddressChanged(address _newTroveManagerAddress);
     event ActivePoolAddressChanged(address _newActivePoolAddress);
-    event CakeMinerAddressChanged(address _cakeMinerAddress);
 
     event AssetBalanceUpdated(address indexed _asset, uint _balance);
     event CollBalanceUpdated(address indexed _account, address indexed _asset, uint _newBalance);
@@ -22,11 +21,11 @@ interface ICollSurplusPool is IPayablePool {
     // --- Contract setters ---
 
     function setAddresses(
+        address _assetConfigManagerAddress,
         address _borrowerOperationsAddress,
         address _liquidatorOperationsAddress,
         address _redeemerOperationsAddress,
-        address _activePoolAddress,
-        address _cakeMinerAddress
+        address _activePoolAddress
     ) external;
 
     function getAssetBalance(address _asset) external view returns (uint);

@@ -5,7 +5,7 @@ pragma experimental ABIEncoderV2;
 
 import "./Interfaces/IActivePool.sol";
 import "./Interfaces/IAssetConfigManager.sol";
-import "./Interfaces/ICakeMiner.sol";
+import "./Interfaces/IFarmer.sol";
 import "./Interfaces/ICollSurplusPool.sol";
 import "./Interfaces/ICommunityIssuance.sol";
 import "./Interfaces/IGlobalConfigManager.sol";
@@ -31,7 +31,6 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
     struct ContractsCache {
         ITroveManagerV2 troveManager;
         IActivePool activePool;
-        ICakeMiner cakeMiner;
         IStabilityPool stabilityPool;
         ICollSurplusPool collSurplusPool;
         ILUSDToken lusdToken;
@@ -91,8 +90,6 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
 
     IActivePool public activePool;
 
-    ICakeMiner public cakeMiner;
-
     IStabilityPool public stabilityPool;
 
     address public gasPoolAddress;
@@ -100,8 +97,6 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
     ICollSurplusPool public collSurplusPool;
 
     ILUSDToken public lusdToken;
-
-    IPriceFeed public priceFeed;
 
     IAssetConfigManager public assetConfigManager;
 
@@ -123,9 +118,7 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
         require(address(troveManager) == address(0), "address has already been set");
 
         checkContract(addresses.troveManagerAddress);
-        checkContract(addresses.priceFeedAddress);
         checkContract(addresses.activePoolAddress);
-        checkContract(addresses.cakeMinerAddress);
         checkContract(addresses.stabilityPoolAddress);
         checkContract(addresses.gasPoolAddress);
         checkContract(addresses.collSurplusPoolAddress);
@@ -137,9 +130,7 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
         checkContract(addresses.lockerAddress);
 
         troveManager = ITroveManagerV2(addresses.troveManagerAddress);
-        priceFeed = IPriceFeed(addresses.priceFeedAddress);
         activePool = IActivePool(addresses.activePoolAddress);
-        cakeMiner = ICakeMiner(addresses.cakeMinerAddress);
         stabilityPool = IStabilityPool(addresses.stabilityPoolAddress);
         gasPoolAddress = addresses.gasPoolAddress;
         collSurplusPool = ICollSurplusPool(addresses.collSurplusPoolAddress);
@@ -151,9 +142,7 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
         locker = ILocker(addresses.lockerAddress);
 
         emit TroveManagerAddressChanged(addresses.troveManagerAddress);
-        emit PriceFeedAddressChanged(addresses.priceFeedAddress);
         emit ActivePoolAddressChanged(addresses.activePoolAddress);
-        emit CakeMinerAddressChanged(addresses.cakeMinerAddress);
         emit StabilityPoolAddressChanged(addresses.stabilityPoolAddress);
         emit GasPoolAddressChanged(addresses.gasPoolAddress);
         emit CollSurplusPoolAddressChanged(addresses.collSurplusPoolAddress);
@@ -209,7 +198,6 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
         ContractsCache memory cache = ContractsCache(
             troveManager,
             activePool,
-            cakeMiner,
             stabilityPool,
             collSurplusPool,
             lusdToken,
@@ -222,7 +210,7 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
 
         DataTypes.AssetConfig memory config = cache.assetConfigManager.get(_asset);
 
-        vars.price = priceFeed.fetchPrice(_asset);
+        vars.price = IPriceFeed(config.priceOracleAddress).fetchPrice(_asset);
         vars.recoveryModeAtStart = cache.troveManager.checkRecoveryMode(_asset, vars.price);
 
         // Perform the appropriate liquidation sequence - tally values and obtain their totals.
@@ -271,7 +259,7 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
         LiquidationValues memory singleLiquidation;
 
         address _asset = _config.asset;
-        uint MCR = _config.mcr;
+        uint MCR = _config.riskParams.mcr;
 
         vars.remainingLUSDInStabPool = _cache.stabilityPool.getTotalLUSDDeposits(_asset);
         vars.backToNormalMode = false;
@@ -314,7 +302,7 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
                     _config.decimals,
                     vars.entireSystemDebt,
                     _price,
-                    _cache.assetConfigManager.get(_asset).ccr
+                    _config.riskParams.ccr
                 );
             }
 
@@ -323,7 +311,6 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
                     _cache,
                     vars.user,
                     _asset,
-                    _price,
                     vars.remainingLUSDInStabPool
                 );
 
@@ -353,14 +340,14 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
         address _asset = _config.asset;
 
         vars.remainingLUSDInStabPool = _cache.stabilityPool.getTotalLUSDDeposits(_asset);
-        uint MCR = _config.mcr;
+        uint MCR = _config.riskParams.mcr;
 
         for (vars.i = 0; vars.i < _troveArray.length; vars.i++) {
             vars.user = _troveArray[vars.i];
             vars.ICR = _cache.troveManager.getCurrentICR(vars.user, _asset, _price);
 
             if (vars.ICR < MCR) {
-                singleLiquidation = _liquidateNormalMode(_cache, vars.user, _asset, _price, vars.remainingLUSDInStabPool);
+                singleLiquidation = _liquidateNormalMode(_cache, vars.user, _asset, vars.remainingLUSDInStabPool);
 
                 // Update aggregate trackers
                 vars.remainingLUSDInStabPool = vars.remainingLUSDInStabPool.sub(singleLiquidation.debtToOffset);
@@ -384,8 +371,8 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
 
         // transfer remaining collateral to collSurplusPool
         if (_totals.totalCollSurplus > 0) {
-            if (_cache.cakeMiner.isSupported(_asset)) {
-                _cache.cakeMiner.sendAssetToPool(_asset, address(_cache.collSurplusPool), _totals.totalCollSurplus);
+            if (_config.farmerAddress != address(0)) {
+                IFarmer(_config.farmerAddress).sendAssetToPool(_asset, address(_cache.collSurplusPool), _totals.totalCollSurplus);
             } else {
                 _cache.activePool.sendAssetToPool(_asset, address(_cache.collSurplusPool), _totals.totalCollSurplus);
             }
@@ -397,8 +384,8 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
         }
 
         if (_totals.totalCollGasCompensation > 0) {
-            if (_cache.cakeMiner.isSupported(_asset)) {
-                _cache.cakeMiner.sendAsset(_asset, msg.sender, _totals.totalCollGasCompensation);
+            if (_config.farmerAddress != address(0)) {
+                IFarmer(_config.farmerAddress).sendAsset(_asset, msg.sender, _totals.totalCollGasCompensation);
             } else {
                 _cache.activePool.sendAsset(_asset, msg.sender, _totals.totalCollGasCompensation);
             }
@@ -409,7 +396,6 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
         ContractsCache memory _cache,
         address _borrower,
         address _asset,
-        uint _price,
         uint _LUSDInStabPool
     )
         internal
@@ -420,7 +406,6 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
         _cache.troveManager.closeTrove(
             _borrower,
             _asset,
-            _price,
             singleLiquidation.collToRedistribute,
             singleLiquidation.debtToRedistribute,
             ITroveManagerV2.Status.closedByLiquidation,
@@ -452,7 +437,7 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
         // don't liquidate if last trove
         if (_cache.troveManager.getTroveOwnersCount(_asset) <= 1) { return singleLiquidation; }
 
-        uint MCR = _cache.assetConfigManager.get(_asset).mcr;
+        uint MCR = _cache.assetConfigManager.get(_asset).riskParams.mcr;
 
         if (_ICR <= _100pct) {
             // If ICR <= 100%, purely redistribute the Trove across all active Troves
@@ -480,7 +465,6 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
             _cache.troveManager.closeTrove(
                 _borrower,
                 _asset,
-                _price,
                 singleLiquidation.collToRedistribute,
                 singleLiquidation.debtToRedistribute,
                 ITroveManagerV2.Status.closedByLiquidation,
@@ -567,7 +551,7 @@ contract LiquidatorOperations is BaseMath, CheckContract, OwnableUpgradeable, Gu
         lv.entireTroveDebt = _cache.troveManager.getTroveDebt(_borrower, _asset);
 
         DataTypes.AssetConfig memory _config = _cache.assetConfigManager.get(_asset);
-        uint collToOffset = LiquityMath._scaleToCollDecimals(lv.entireTroveDebt.mul(_config.mcr).div(_price), _config.decimals);
+        uint collToOffset = LiquityMath._scaleToCollDecimals(lv.entireTroveDebt.mul(_config.riskParams.mcr).div(_price), _config.decimals);
 
         lv.collGasCompensation = collToOffset.div(_config.liquidationBonusDivisor);
         lv.LUSDGasCompensation = _cache.troveManager.getTroveGasCompensation(_borrower, _asset);

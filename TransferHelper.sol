@@ -29,7 +29,7 @@ library TransferHelper {
         require(success, "TransferHelper: Sending ETH failed");
     }
 
-    function balanceOf(address token, address addr) internal returns (uint) {
+    function balanceOf(address token, address addr) internal view returns (uint) {
         if (token.isPlatformToken()) {
             return addr.balance;
         } else {

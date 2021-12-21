@@ -4,7 +4,7 @@ pragma solidity 0.6.11;
 pragma experimental ABIEncoderV2;
 
 import "./Interfaces/IAssetConfigManager.sol";
-import "./Interfaces/ICakeMiner.sol";
+import "./Interfaces/IFarmer.sol";
 import "./Interfaces/ICommunityIssuance.sol";
 import "./Interfaces/IGlobalConfigManager.sol";
 import "./Interfaces/ITroveManagerV2.sol";
@@ -39,8 +39,6 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
     IGlobalConfigManager public globalConfigManager;
 
     ICommunityIssuance public communityIssuance;
-
-    ICakeMiner public cakeMiner;
 
     ILUSDToken public lusdToken;
 
@@ -84,19 +82,24 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
     // asset address => trove owners
     mapping (address => address[]) public TroveOwnersPerAsset;
 
-    // Error trackers for the trove redistribution calculation
-    mapping (address => uint) public lastCollErrors_Redistribution;
     // Error trackers of the normalized debt for trove redistribution
     mapping (address => uint ) public lastLUSDDebtErrors_Redistribution;
 
+    struct L_Snapshot {
+        uint lastRewardedTime;
+    }
+
+    // asset => reward speed
+    mapping (address => uint) public liquidityRewardSpeeds;
+
+    // asset => last rewarded time
+    mapping (address => L_Snapshot) public L_Snapshots;
+
     // Current index of lqty rewards
-    mapping (address => uint) public L_LQTYRewards;
+    mapping (address => uint) public lqtyIndexes;
 
-    // trove address => asset address => snapshot of L_LQTYRewards
-    mapping (address => mapping(address => uint)) public lqtyRewardSnapshots;
-
-    // trove address => asset address => accrued LQTY rewards
-    mapping (address => mapping(address => uint)) public accruedLQTYRewards;
+    // trove address => asset address => snapshot of lqty index
+    mapping (address => mapping(address => uint)) public lqtyIndexSnapshots;
 
     // --- Dependency setter ---
 
@@ -106,6 +109,10 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
 
     function initializeAssetInternal(address asset, bytes calldata data) internal override {
         debtRs[asset] = DebtR(0, block.timestamp, DECIMAL_PRECISION);
+        uint liquidityRewardSpeed = abi.decode(data, (uint));
+        liquidityRewardSpeeds[asset] = liquidityRewardSpeed;
+        L_Snapshots[asset].lastRewardedTime = block.timestamp;
+        emit LiquidityRewardSpeedUpdated(asset, liquidityRewardSpeed);
     }
 
     function setAddresses(
@@ -113,7 +120,6 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         address _liquidatorOperationsAddress,
         address _redeemerOperationsAddress,
         address _sortedTrovesAddress,
-        address _cakeMinerAddress,
         address _assetConfigManagerAddress,
         address _globalConfigManagerAddress,
         address _communityIssuanceAddress,
@@ -130,10 +136,8 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         checkContract(_liquidatorOperationsAddress);
         checkContract(_redeemerOperationsAddress);
         checkContract(_sortedTrovesAddress);
-        checkContract(_cakeMinerAddress);
         checkContract(_assetConfigManagerAddress);
         checkContract(_globalConfigManagerAddress);
-        checkContract(_liquidatorOperationsAddress);
         checkContract(_communityIssuanceAddress);
         checkContract(_lusdTokenAddress);
         checkContract(_reservePoolAddress);
@@ -142,7 +146,6 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         liquidatorOperationsAddress = _liquidatorOperationsAddress;
         redeemerOperationsAddress = _redeemerOperationsAddress;
         sortedTroves = ISortedTroves(_sortedTrovesAddress);
-        cakeMiner = ICakeMiner(_cakeMinerAddress);
         assetConfigManager = IAssetConfigManager(_assetConfigManagerAddress);
         globalConfigManager = IGlobalConfigManager(_globalConfigManagerAddress);
         communityIssuance = ICommunityIssuance(_communityIssuanceAddress);
@@ -154,7 +157,6 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         emit LiquidatorOperationsAddressChanged(_liquidatorOperationsAddress);
         emit RedeemerOperationsAddressChanged(_redeemerOperationsAddress);
         emit SortedTrovesAddressChanged(_sortedTrovesAddress);
-        emit CakeMinerAddressChanged(_cakeMinerAddress);
         emit AssetConfigManagerAddressChanged(_assetConfigManagerAddress);
         emit GlobalConfigManagerAddressChanged(_globalConfigManagerAddress);
         emit CommunityIssuanceAddressChanged(_communityIssuanceAddress);
@@ -171,7 +173,7 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         emit DebtRUpdated(_asset, _rate, _debtR.R);
     }
 
-    function _calculateR(uint _R, uint _rate, uint _seconds) internal view returns (uint) {
+    function _calculateR(uint _R, uint _rate, uint _seconds) internal pure returns (uint) {
         uint _base = DECIMAL_PRECISION.add(_rate);
         return _R.mul(LiquityMath._baseDecPow(_base, _seconds)).div(DECIMAL_PRECISION);
     }
@@ -266,7 +268,7 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         returns (address[] memory)
     {
         DataTypes.AssetConfig memory _config = assetConfigManager.get(_asset);
-        uint mcr = _config.mcr;
+        uint mcr = _config.riskParams.mcr;
         address currentBorrower;
         if (isValidHint(_asset, _firstHint, _price)) {
             currentBorrower = _firstHint;
@@ -316,7 +318,7 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         returns (bool)
     {
         DataTypes.AssetConfig memory _config = assetConfigManager.get(_asset);
-        uint mcr = _config.mcr;
+        uint mcr = _config.riskParams.mcr;
         if (_firstHint == address(0) ||
             !sortedTroves.contains(_asset, _firstHint) ||
             _getCurrentICR(_firstHint, _config, _price) < mcr
@@ -370,7 +372,7 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
     {
         DataTypes.AssetConfig memory _config = assetConfigManager.get(_asset);
         uint ICR = _getCurrentICR(_borrower, _config, _price);
-        uint MCR = _config.mcr;
+        uint MCR = _config.riskParams.mcr;
         return ICR < MCR;
     }
 
@@ -600,9 +602,7 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
 
         _updateLQTYRewardIndex(_asset);
 
-        if (cakeMiner.isSupported(_asset)) {
-            _applyPendingCakeRewards(_borrower, _asset);
-        }
+        _applyPendingFarmRewards(_borrower, _config);
 
         // initialize coll & debt
         uint _nDebt = _normalizeDebt(_asset, _debt);
@@ -646,7 +646,6 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
     function closeTrove(
         address _borrower,
         address _asset,
-        uint _price,
         uint _redistributedColl,
         uint _redistributedDebt,
         Status _closedStatus,
@@ -670,9 +669,7 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         // apply pending lqty rewards
         _applyPendingLQTYRewards(_borrower, _asset);
 
-        if (cakeMiner.isSupported(_asset)) {
-            _applyPendingCakeRewards(_borrower, _asset);
-        }
+        _applyPendingFarmRewards(_borrower, assetConfigManager.get(_asset));
 
         uint _nDebt = Troves[_borrower][_asset].debt;
         uint _nRedistributedDebt = _normalizeDebt(_asset, _redistributedDebt);
@@ -741,9 +738,7 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         // apply pending lqty rewards
         _applyPendingLQTYRewards(_borrower, _asset);
 
-        if (cakeMiner.isSupported(_asset)) {
-            _applyPendingCakeRewards(_borrower, _asset);
-        }
+        _applyPendingFarmRewards(_borrower, assetConfigManager.get(_asset));
 
         // compute new debt/coll/stake
         AdjustVariables memory vars = _computeAdjustValues(
@@ -766,7 +761,46 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         emit TroveUpdated(_asset, _borrower, _newDebt, vars.newNormalizedDebt, vars.newColl, vars.newStake, _operation);
     }
 
-    function issueLQTYRewards(
+    function updateLiquidityRewardSpeed(address _asset, uint _speed)
+        external
+        override
+        onlySupportedAsset(_asset)
+        onlyOwner
+    {
+        _updateLQTYRewardIndex(_asset);
+
+        liquidityRewardSpeeds[_asset] = _speed;
+        emit LiquidityRewardSpeedUpdated(_asset, _speed);
+    }
+
+    function getPendingLQTYRewards(
+        address _borrower,
+        address _asset
+    )
+        onlySupportedAsset(_asset)
+        public
+        view
+        override
+        returns (uint)
+    {
+        uint totalStakes = totalStakesPerAsset[_asset];
+        if (totalStakes == 0) {
+            return 0;
+        }
+
+        uint reward = _calcLQTYReward(_asset);
+        uint latestIndex = lqtyIndexes[_asset];
+        if (reward > 0) {
+            latestIndex = latestIndex.add(reward.mul(DECIMAL_PRECISION).div(totalStakes));
+        }
+
+        return latestIndex
+            .sub(lqtyIndexSnapshots[_borrower][_asset])
+            .mul(Troves[_borrower][_asset].stake)
+            .div(DECIMAL_PRECISION);
+    }
+
+    function claimLQTYRewards(
         address _borrower,
         address _asset
     )
@@ -776,12 +810,6 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
     {
         _requireCallerIsBorrowerOperations();
         _applyPendingLQTYRewards(_borrower, _asset);
-
-        uint curRewards = accruedLQTYRewards[_borrower][_asset];
-        accruedLQTYRewards[_borrower][_asset] = 0;
-        emit IssueLQTYRewards(_asset, _borrower, curRewards);
-
-        return curRewards;
     }
 
     struct AdjustVariables {
@@ -866,7 +894,7 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         returns (bool)
     {
         uint TCR = _getTCR(_asset, _price);
-        uint CCR = assetConfigManager.get(_asset).ccr;
+        uint CCR = assetConfigManager.get(_asset).riskParams.ccr;
 
         return TCR < CCR;
     }
@@ -949,13 +977,16 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
         }
     }
 
-    function _applyPendingCakeRewards(
+    function _applyPendingFarmRewards(
         address _borrower,
-        address _asset
+        DataTypes.AssetConfig memory _config
     )
         internal
     {
-        cakeMiner.issueCake(_asset, _borrower);
+        if (_config.farmerAddress == address(0)) {
+            return;
+        }
+        IFarmer(_config.farmerAddress).issueRewards(_config.asset, _borrower);
     }
 
     function _updateDebtRewardSnapshots(
@@ -988,12 +1019,32 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
     {
         uint totalStakes = totalStakesPerAsset[_asset];
         if (totalStakes > 0) {
-            uint accruedLQTYReward = communityIssuance.issueLiquidityLQTY(_asset);
-            uint rewardPerStake = accruedLQTYReward.mul(DECIMAL_PRECISION).div(totalStakes);
-            uint latestLQTYReward = L_LQTYRewards[_asset].add(rewardPerStake);
-            L_LQTYRewards[_asset] = latestLQTYReward;
-            emit L_LQTYRewardsUpdated(_asset, latestLQTYReward);
+            uint reward = _calcLQTYReward(_asset);
+            if (reward > 0) {
+                uint rewardPerStake = reward.mul(DECIMAL_PRECISION).div(totalStakes);
+                uint latestLQTYReward = lqtyIndexes[_asset].add(rewardPerStake);
+                lqtyIndexes[_asset] = latestLQTYReward;
+                emit L_LQTYRewardsUpdated(_asset, latestLQTYReward);
+                communityIssuance.updateTotalLiquidityLQTYIssued(_asset, reward);
+            }
+            L_Snapshots[_asset].lastRewardedTime = block.timestamp;
+            emit L_SnapshotUpdated(_asset, block.timestamp);
         }
+    }
+
+    function _calcLQTYReward(address _asset)
+        internal
+        view
+        returns (uint)
+    {
+        L_Snapshot memory snapshotCached = L_Snapshots[_asset];
+
+        uint curTime = block.timestamp;
+        if (curTime <= snapshotCached.lastRewardedTime) {
+            return 0;
+        }
+
+        return curTime.sub(snapshotCached.lastRewardedTime).mul(liquidityRewardSpeeds[_asset]);
     }
 
     function _updateLQTYRewardSnapshots(
@@ -1002,8 +1053,8 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
     )
         internal
     {
-        uint new_L = L_LQTYRewards[_asset];
-        lqtyRewardSnapshots[_borrower][_asset] = new_L;
+        uint new_L = lqtyIndexes[_asset];
+        lqtyIndexSnapshots[_borrower][_asset] = new_L;
         emit LQTYRewardSnapshotUpdated(_asset, _borrower, new_L);
     }
 
@@ -1015,11 +1066,10 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
     {
         _updateLQTYRewardIndex(_asset);
 
-        uint rewardPerStake = L_LQTYRewards[_asset].sub(lqtyRewardSnapshots[_borrower][_asset]);
+        uint rewardPerStake = lqtyIndexes[_asset].sub(lqtyIndexSnapshots[_borrower][_asset]);
         uint rewards = rewardPerStake.mul(Troves[_borrower][_asset].stake).div(DECIMAL_PRECISION);
-        uint latestLQTYReward = accruedLQTYRewards[_borrower][_asset].add(rewards);
-        accruedLQTYRewards[_borrower][_asset] = latestLQTYReward;
-        emit ApplyLQTYRewards(_asset, _borrower, rewards);
+
+        communityIssuance.sendLQTY(_borrower, rewards);
 
         _updateLQTYRewardSnapshots(_borrower, _asset);
     }
@@ -1030,7 +1080,7 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
     )
         internal
     {
-        lqtyRewardSnapshots[_borrower][_asset] = 0;
+        lqtyIndexSnapshots[_borrower][_asset] = 0;
         emit LQTYRewardSnapshotUpdated(_asset, _borrower, 0);
     }
 
@@ -1154,19 +1204,19 @@ contract TroveManagerV2 is BaseMath, CheckContract, MultiAssetInitializable, ITr
     }
 
     function _requireMinDebt(DataTypes.AssetConfig memory _config, uint _debt, uint _gasCompensation) internal pure {
-        require(_debt.sub(_gasCompensation) >= _config.minDebt, "TroveManager: debt must be greater than the minDebt");
+        require(_debt.sub(_gasCompensation) >= _config.riskParams.minDebt, "TroveManager: debt must be greater than the minDebt");
     }
 
     function _requireICRIsAboveCCR(DataTypes.AssetConfig memory _config, uint _icr) internal pure {
-        require(_icr >= _config.ccr, "TroveManager: icr must be greater than ccr");
+        require(_icr >= _config.riskParams.ccr, "TroveManager: icr must be greater than ccr");
     }
 
     function _requireICRIsAboveMCR(DataTypes.AssetConfig memory _config, uint _icr) internal pure {
-        require(_icr >= _config.mcr, "TroveManager: icr must be greater than mcr");
+        require(_icr >= _config.riskParams.mcr, "TroveManager: icr must be greater than mcr");
     }
 
     function _requireNewTCRIsAboveCCR(DataTypes.AssetConfig memory _config, uint _newTCR) internal pure {
-        require(_newTCR >= _config.ccr, "TroveManager: tcr must be greater than ccr");
+        require(_newTCR >= _config.riskParams.ccr, "TroveManager: tcr must be greater than ccr");
     }
 
     function _requireCallerIsBorrowerOperations() internal view {

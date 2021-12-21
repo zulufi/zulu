@@ -5,7 +5,7 @@ pragma experimental ABIEncoderV2;
 
 import "./Interfaces/IActivePool.sol";
 import "./Interfaces/IAssetConfigManager.sol";
-import "./Interfaces/ICakeMiner.sol";
+import "./Interfaces/IFarmer.sol";
 import "./Interfaces/ICommunityIssuance.sol";
 import "./Interfaces/IFeeRateModel.sol";
 import "./Interfaces/IGuardian.sol";
@@ -44,15 +44,11 @@ contract RedeemerOperations is
 
     IActivePool public activePool;
 
-    ICakeMiner public cakeMiner;
-
     address public gasPoolAddress;
 
     ICollSurplusPool public collSurplusPool;
 
     IReservePool public reservePool;
-
-    IPriceFeed public priceFeed;
 
     ILUSDToken public lusdToken;
 
@@ -72,7 +68,6 @@ contract RedeemerOperations is
         IGlobalConfigManager globalConfigManager;
         ITroveManagerV2 troveManager;
         IActivePool activePool;
-        ICakeMiner cakeMiner;
         ILUSDToken lusdToken;
         ILQTYStaking lqtyStaking;
         ICollSurplusPool collSurplusPool;
@@ -132,11 +127,9 @@ contract RedeemerOperations is
         checkContract(addresses.globalConfigManagerAddress);
         checkContract(addresses.troveManagerAddress);
         checkContract(addresses.activePoolAddress);
-        checkContract(addresses.cakeMinerAddress);
         checkContract(addresses.gasPoolAddress);
         checkContract(addresses.collSurplusPoolAddress);
         checkContract(addresses.reservePoolAddress);
-        checkContract(addresses.priceFeedAddress);
         checkContract(addresses.lusdTokenAddress);
         checkContract(addresses.lqtyStakingAddress);
         checkContract(addresses.guardianAddress);
@@ -147,11 +140,9 @@ contract RedeemerOperations is
         globalConfigManager = IGlobalConfigManager(addresses.globalConfigManagerAddress);
         troveManager = ITroveManagerV2(addresses.troveManagerAddress);
         activePool = IActivePool(addresses.activePoolAddress);
-        cakeMiner = ICakeMiner(addresses.cakeMinerAddress);
         gasPoolAddress = addresses.gasPoolAddress;
         collSurplusPool = ICollSurplusPool(addresses.collSurplusPoolAddress);
         reservePool = IReservePool(addresses.reservePoolAddress);
-        priceFeed = IPriceFeed(addresses.priceFeedAddress);
         lusdToken = ILUSDToken(addresses.lusdTokenAddress);
         lqtyStaking = ILQTYStaking(addresses.lqtyStakingAddress);
         guardian = IGuardian(addresses.guardianAddress);
@@ -162,11 +153,9 @@ contract RedeemerOperations is
         emit GlobalConfigManagerAddressChanged(addresses.globalConfigManagerAddress);
         emit TroveManagerAddressChanged(addresses.troveManagerAddress);
         emit ActivePoolAddressChanged(addresses.activePoolAddress);
-        emit CakeMinerAddressChanged(addresses.cakeMinerAddress);
         emit GasPoolAddressChanged(addresses.gasPoolAddress);
         emit CollSurplusPoolAddressChanged(addresses.collSurplusPoolAddress);
         emit ReservePoolAddressChanged(addresses.reservePoolAddress);
-        emit PriceFeedAddressChanged(addresses.priceFeedAddress);
         emit LUSDTokenAddressChanged(addresses.lusdTokenAddress);
         emit LQTYStakingAddressChanged(addresses.lqtyStakingAddress);
         emit GuardianAddressChanged(addresses.guardianAddress);
@@ -214,7 +203,6 @@ contract RedeemerOperations is
             _contractsCache.troveManager.closeTrove(
                 _borrower,
                 _assetConfig.asset,
-                val.price,
                 0,
                 0,
                 ITroveManagerV2.Status.closedByRedemption,
@@ -249,7 +237,7 @@ contract RedeemerOperations is
             uint NICR = _contractsCache.troveManager.computeNominalICR(_assetConfig.asset, singleRedemption.newColl, singleRedemption.newDebt);
             if (
                 NICR.mul(DECIMAL_PRECISION) < val.partialRedemptionHintNICR.mul(hintPartialNICRFactorFloor) ||
-                singleRedemption.newDebt.sub(singleRedemption.gasCompensation) < _assetConfig.minDebt
+                singleRedemption.newDebt.sub(singleRedemption.gasCompensation) < _assetConfig.riskParams.minDebt
             ) {
                 singleRedemption.cancelledPartial = true;
                 return singleRedemption;
@@ -335,7 +323,6 @@ contract RedeemerOperations is
             globalConfigManager,
             troveManager,
             activePool,
-            cakeMiner,
             lusdToken,
             lqtyStaking,
             collSurplusPool,
@@ -347,7 +334,7 @@ contract RedeemerOperations is
 
         _requireValidMaxFeePercentage(assetConfig.feeRateParams, _maxFeePercentage);
         _requireAfterBootstrapPeriod(assetConfig);
-        totals.price = priceFeed.fetchPrice(_asset);
+        totals.price = IPriceFeed(assetConfig.priceOracleAddress).fetchPrice(_asset);
         _requireTCRoverMCR(contractsCache.troveManager, assetConfig, totals.price);
         _requireAmountGreaterThanZero(_LUSDamount);
         _requireLUSDBalanceCoversRedemption(contractsCache.lusdToken, msg.sender, _LUSDamount);
@@ -356,7 +343,7 @@ contract RedeemerOperations is
 
         // Loop through the Troves starting from the one with lowest collateral ratio until _amount of LUSD is exchanged for collateral
         if (_maxIterations == 0) {
-            _maxIterations = totals.remainingLUSD.div(assetConfig.minDebt).add(1);
+            _maxIterations = totals.remainingLUSD.div(assetConfig.riskParams.minDebt).add(1);
         }
         address[] memory troveArray = contractsCache.troveManager.getLastNTrovesAboveMCR(
             _asset,
@@ -434,8 +421,8 @@ contract RedeemerOperations is
         // Burn gas compensation of troves closed by redemption
         contractsCache.lusdToken.burn(gasPoolAddress, totals.totalGasCompensation);
         // send coll from Active Pool to CollSurplus Pool
-        if (contractsCache.cakeMiner.isSupported(_asset)) {
-            contractsCache.cakeMiner.sendAssetToPool(_asset, address(contractsCache.collSurplusPool), totals.totalCollSurplus);
+        if (assetConfig.farmerAddress != address(0)) {
+            IFarmer(assetConfig.farmerAddress).sendAssetToPool(_asset, address(contractsCache.collSurplusPool), totals.totalCollSurplus);
         } else {
             contractsCache.activePool.sendAssetToPool(
                 _asset,
@@ -446,8 +433,8 @@ contract RedeemerOperations is
 
         // Burn the total LUSD that is cancelled with debt, and send the redeemed coll to msg.sender
         contractsCache.lusdToken.burn(msg.sender, totals.totalLUSDToRedeem);
-        if (contractsCache.cakeMiner.isSupported(_asset)) {
-            contractsCache.cakeMiner.sendAsset(_asset, msg.sender, totals.totalCollDrawn);
+        if (assetConfig.farmerAddress != address(0)) {
+            IFarmer(assetConfig.farmerAddress).sendAsset(_asset, msg.sender, totals.totalCollDrawn);
         } else {
             contractsCache.activePool.sendAsset(_asset, msg.sender, totals.totalCollDrawn);
         }
@@ -461,7 +448,7 @@ contract RedeemerOperations is
     ) internal view {
         require(
             _lusdToken.balanceOf(_redeemer) >= _amount,
-            "RedeemerOperations: Requested redemption amount must be <= user's LUSD token balance"
+            "RedeemerOperations: Requested redemption amount must be <= user's token balance"
         );
     }
 
@@ -477,7 +464,7 @@ contract RedeemerOperations is
         uint256 entireSystemDebt = _troveManager.getEntireSystemDebt(_assetConfig.asset);
         uint256 entireSystemColl = _troveManager.getEntireSystemColl(_assetConfig.asset);
         require(
-            LiquityMath._computeCR(entireSystemColl, _assetConfig.decimals, entireSystemDebt, _price) >= _assetConfig.mcr,
+            LiquityMath._computeCR(entireSystemColl, _assetConfig.decimals, entireSystemDebt, _price) >= _assetConfig.riskParams.mcr,
             "RedeemerOperations: Cannot redeem when TCR < MCR"
         );
     }

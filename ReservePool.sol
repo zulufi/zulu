@@ -73,7 +73,7 @@ contract ReservePool is OwnableUpgradeable, CheckContract, IReservePool {
         require(_account != address(0), "ReservePool: can't withdraw to address(0)");
         assetLUSDInterests[_asset] = assetLUSDInterests[_asset].sub(_amount, "ReservePool: has no enough balance");
         emit LUSDInterestUpdated(_asset, assetLUSDInterests[_asset]);
-        address(_asset).safeTransferToken(_account, _amount);
+        lusdToken.transfer(_account, _amount);
     }
 
     // called after real transfer LUSD to the reservePool

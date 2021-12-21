@@ -17,37 +17,13 @@ interface ICakeMiner {
     event CakeSent(address indexed _asset, address indexed _to, uint256 _amount);
     event C_Updated(address indexed _asset, uint256 _C);
     event UserSnapshotUpdated(address indexed _asset, address indexed _user, uint256 _C);
-    event Deposited(address indexed _asset, uint256 _amount);
     event Withdrawn(address indexed _asset, uint256 _amount);
-    event AssetSent(address indexed _asset, address indexed _to, uint256 _amount);
     event AssetCakeBalanceUpdated(address indexed _asset, uint256 _newBalance);
 
     // --- Functions ---
     function updateReserveFactor(uint256 _reserveFactor) external;
 
     function withdrawCake(address _asset, address _account, uint256 _amount) external;
-
-    function isSupported(address _asset) external view returns (bool);
-
-    function deposit(address _asset, uint256 _amount) external;
-
-    function balanceOfAsset(address _asset) external view returns (uint256);
-
-    function sendAsset(
-        address _asset,
-        address _user,
-        uint256 _amount
-    ) external;
-
-    function sendAssetToPool(
-        address _asset,
-        address _pool,
-        uint256 _amount
-    ) external;
-
-    function issueCake(address _asset, address _user) external;
-
-    function claimRewards(address _asset, address _user) external;
 
     function getPendingCake(address _asset, address _user) external view returns (uint256);
 }

@@ -5,8 +5,8 @@ pragma experimental ABIEncoderV2;
 
 import './Interfaces/IActivePool.sol';
 import './Interfaces/IAssetConfigManager.sol';
-import "./Interfaces/ICakeMiner.sol";
 import "./Interfaces/ICommunityIssuance.sol";
+import "./Interfaces/IFarmer.sol";
 import './Interfaces/IGuardian.sol';
 import './Interfaces/ILUSDToken.sol';
 import './Interfaces/IPriceFeed.sol';
@@ -167,10 +167,6 @@ contract StabilityPool is BaseMath, CheckContract, MultiAssetInitializable, Guar
 
     IActivePool public activePool;
 
-    ICakeMiner public cakeMiner;
-
-    IPriceFeed public priceFeed;
-
     ITroveManagerV2 public troveManager;
 
     ILUSDToken public lusdToken;
@@ -255,6 +251,16 @@ contract StabilityPool is BaseMath, CheckContract, MultiAssetInitializable, Guar
     // asset address -> lusd error correction
     mapping (address => uint) public lastLUSDLossError_Offsets;
 
+    struct S_Snapshot {
+        uint lastRewardedTime;
+    }
+
+    // asset => reward speed
+    mapping (address => uint) public stabilityRewardSpeeds;
+
+    // asset => snapshot
+    mapping (address => S_Snapshot) public S_Snapshots;
+
     // --- Contract setters ---
 
     function initialize() public initializer {
@@ -268,9 +274,7 @@ contract StabilityPool is BaseMath, CheckContract, MultiAssetInitializable, Guar
         address _redeemerOperationsAddress,
         address _troveManagerAddress,
         address _activePoolAddress,
-        address _cakeMinerAddress,
         address _lusdTokenAddress,
-        address _priceFeedAddress,
         address _communityIssuanceAddress,
         address _assetConfigManagerAddress,
         address _guardianAddress,
@@ -287,9 +291,7 @@ contract StabilityPool is BaseMath, CheckContract, MultiAssetInitializable, Guar
         checkContract(_redeemerOperationsAddress);
         checkContract(_troveManagerAddress);
         checkContract(_activePoolAddress);
-        checkContract(_cakeMinerAddress);
         checkContract(_lusdTokenAddress);
-        checkContract(_priceFeedAddress);
         checkContract(_communityIssuanceAddress);
         checkContract(_assetConfigManagerAddress);
         checkContract(_guardianAddress);
@@ -300,9 +302,7 @@ contract StabilityPool is BaseMath, CheckContract, MultiAssetInitializable, Guar
         redeemerOperationsAddress = _redeemerOperationsAddress;
         troveManager = ITroveManagerV2(_troveManagerAddress);
         activePool = IActivePool(_activePoolAddress);
-        cakeMiner = ICakeMiner(_cakeMinerAddress);
         lusdToken = ILUSDToken(_lusdTokenAddress);
-        priceFeed = IPriceFeed(_priceFeedAddress);
         communityIssuance = ICommunityIssuance(_communityIssuanceAddress);
         assetConfigManager = IAssetConfigManager(_assetConfigManagerAddress);
         guardian = IGuardian(_guardianAddress);
@@ -313,9 +313,7 @@ contract StabilityPool is BaseMath, CheckContract, MultiAssetInitializable, Guar
         emit RedeemerOperationsAddressChanged(_redeemerOperationsAddress);
         emit TroveManagerAddressChanged(_troveManagerAddress);
         emit ActivePoolAddressChanged(_activePoolAddress);
-        emit CakeMinerAddressChanged(_cakeMinerAddress);
         emit LUSDTokenAddressChanged(_lusdTokenAddress);
-        emit PriceFeedAddressChanged(_priceFeedAddress);
         emit CommunityIssuanceAddressChanged(_communityIssuanceAddress);
         emit AssetConfigManagerAddressChanged(_assetConfigManagerAddress);
         emit GuardianAddressChanged(_guardianAddress);
@@ -337,6 +335,10 @@ contract StabilityPool is BaseMath, CheckContract, MultiAssetInitializable, Guar
         internal
     {
         P_map[asset] = DECIMAL_PRECISION;
+        uint rewardSpeed = abi.decode(data, (uint));
+        stabilityRewardSpeeds[asset] = rewardSpeed;
+        S_Snapshots[asset].lastRewardedTime = block.timestamp;
+        emit StabilityRewardSpeedUpdated(asset, rewardSpeed);
     }
 
     // --- External Depositor Functions ---
@@ -402,7 +404,8 @@ contract StabilityPool is BaseMath, CheckContract, MultiAssetInitializable, Guar
         guardianAllowed(_asset, 0xeb34a789)
         onlySupportedAsset(_asset)
     {
-        if (_amount !=0) {_requireNoUnderCollateralizedTroves(_asset);}
+        DataTypes.AssetConfig memory config = assetConfigManager.get(_asset);
+        if (_amount !=0) {_requireNoUnderCollateralizedTroves(config);}
         uint initialDeposit = deposits[_asset][msg.sender].initialValue;
         _requireUserHasDeposit(initialDeposit);
 
@@ -432,7 +435,8 @@ contract StabilityPool is BaseMath, CheckContract, MultiAssetInitializable, Guar
     }
 
     function increaseAssetBalance(address _asset, uint _amount) external override {
-        _requireCallerIsActivePoolorCakeMiner();
+        DataTypes.AssetConfig memory config = assetConfigManager.get(_asset);
+        _requireCallerIsActivePoolorFarmer(config.farmerAddress);
 
         uint _newAssetBalance = assetBalances[_asset].add(_amount);
         assetBalances[_asset] = _newAssetBalance;
@@ -440,14 +444,47 @@ contract StabilityPool is BaseMath, CheckContract, MultiAssetInitializable, Guar
         emit StabilityPoolAssetBalanceUpdated(_asset, _newAssetBalance);
     }
 
+    function updateStabilityRewardSpeed(address _asset, uint _speed)
+        external
+        override
+        onlySupportedAsset(_asset)
+        onlyOwner
+    {
+        _triggerLQTYIssuance(communityIssuance, _asset);
+
+        stabilityRewardSpeeds[_asset] = _speed;
+        emit StabilityRewardSpeedUpdated(_asset, _speed);
+    }
+
     function _triggerLQTYIssuance(ICommunityIssuance _communityIssuance, address _asset) internal {
         uint totalLUSD = totalLUSDDeposits[_asset];
         if (totalLUSD > 0) {
-            uint LQTYAccrued = communityIssuance.issueStabilityLQTY(_asset);
+            uint LQTYAccrued = _calcStabilityLQTY(_asset);
+
             if (LQTYAccrued > 0) {
                 _updateG(_asset, LQTYAccrued, totalLUSD);
+                _communityIssuance.updateTotalStabilityLQTYIssued(_asset, LQTYAccrued);
             }
+
+            S_Snapshots[_asset].lastRewardedTime = block.timestamp;
+            emit S_SnapshotUpdated(_asset, block.timestamp);
         }
+    }
+
+    function _calcStabilityLQTY(address _asset)
+        internal
+        view
+        returns (uint)
+    {
+        S_Snapshot memory snapshotCached = S_Snapshots[_asset];
+
+        uint curTime = block.timestamp;
+        if (curTime <= snapshotCached.lastRewardedTime) {
+            return 0;
+        }
+
+        // calculate reward
+        return curTime.sub(snapshotCached.lastRewardedTime).mul(stabilityRewardSpeeds[_asset]);
     }
 
     function _updateG(address _asset, uint _LQTYIssuance, uint _totalLUSD) internal {
@@ -614,8 +651,8 @@ contract StabilityPool is BaseMath, CheckContract, MultiAssetInitializable, Guar
         // Burn the debt that was successfully offset
         lusdToken.burn(address(this), _debtToOffset);
 
-        if (cakeMiner.isSupported(_config.asset)) {
-            cakeMiner.sendAssetToPool(_config.asset, address(this), _collToAdd);
+        if (_config.farmerAddress != address(0)) {
+            IFarmer(_config.farmerAddress).sendAssetToPool(_config.asset, address(this), _collToAdd);
         } else {
             activePoolCached.sendAssetToPool(_config.asset, address(this), _collToAdd);
         }
@@ -673,12 +710,21 @@ contract StabilityPool is BaseMath, CheckContract, MultiAssetInitializable, Guar
         uint initialDeposit = deposits[_asset][_depositor].initialValue;
         if (initialDeposit == 0) {return 0;}
 
-        Snapshots memory snapshots = depositSnapshots[_asset][_depositor];
+        uint marginalG = 0;
+        uint _totalLUSDDeposits = totalLUSDDeposits[_asset];
+        // no stakes in pool, the reward will not issue to the pool
+        if (_totalLUSDDeposits > 0) {
+            uint rewards = _calcStabilityLQTY(_asset);
+            uint LQTYNumerator = rewards.mul(DECIMAL_PRECISION).add(lastLQTYErrors[_asset]);
+            uint LQTYPerUnitStaked = LQTYNumerator.div(_totalLUSDDeposits);
+            marginalG = LQTYPerUnitStaked.mul(P_map[_asset]);
+        }
 
-        return _getLQTYGainFromSnapshots(_asset, initialDeposit, snapshots);
+        Snapshots memory snapshots = depositSnapshots[_asset][_depositor];
+        return _getLQTYGainFromSnapshots(_asset, marginalG, initialDeposit, snapshots);
     }
 
-    function _getLQTYGainFromSnapshots(address _asset, uint initialStake, Snapshots memory snapshots) internal view returns (uint) {
+    function _getLQTYGainFromSnapshots(address _asset, uint marginalG, uint initialStake, Snapshots memory snapshots) internal view returns (uint) {
         /*
          * Grab the sum 'G' from the epoch at which the stake was made. The LQTY gain may span up to one scale change.
          * If it does, the second portion of the LQTY gain is scaled by 1e9.
@@ -690,7 +736,14 @@ contract StabilityPool is BaseMath, CheckContract, MultiAssetInitializable, Guar
         uint P_Snapshot = snapshots.P;
 
         uint firstPortion = assetToEpochToScaleToG[_asset][epochSnapshot][scaleSnapshot].sub(G_Snapshot);
+        if (currentScales[_asset] == scaleSnapshot) {
+            firstPortion = firstPortion.add(marginalG);
+        }
+
         uint secondPortion = assetToEpochToScaleToG[_asset][epochSnapshot][scaleSnapshot.add(1)].div(SCALE_FACTOR);
+        if (currentScales[_asset] == scaleSnapshot.add(1)) {
+            secondPortion = secondPortion.add(marginalG);
+        }
 
         uint LQTYGain = initialStake.mul(firstPortion.add(secondPortion)).div(P_Snapshot).div(DECIMAL_PRECISION);
 
@@ -828,14 +881,16 @@ contract StabilityPool is BaseMath, CheckContract, MultiAssetInitializable, Guar
         require(msg.sender == liquidatorOperationsAddress, "StabilityPool: Caller is not liquidatorOperations");
     }
 
-    function _requireCallerIsActivePoolorCakeMiner() internal view {
+    function _requireCallerIsActivePoolorFarmer(address _farmerAddress) internal view {
         require(
-            msg.sender == address(activePool) || msg.sender == address(cakeMiner),
-            "StabilityPool: Caller is not ActivePool nor CakeMiner");
+            (_farmerAddress == address(0) && msg.sender == address(activePool)) ||
+            (_farmerAddress != address(0) && msg.sender == _farmerAddress),
+            "StabilityPool: Caller is not ActivePool nor Farmer");
     }
 
-    function _requireNoUnderCollateralizedTroves(address _asset) internal {
-        uint price = priceFeed.fetchPrice(_asset);
+    function _requireNoUnderCollateralizedTroves(DataTypes.AssetConfig memory _config) internal {
+        address _asset = _config.asset;
+        uint price = IPriceFeed(_config.priceOracleAddress).fetchPrice(_asset);
         ITroveManagerV2 troveManagerCached = troveManager;
         address[] memory troves = troveManagerCached.getLastNTroveOwners(_asset, 1);
         require(troves[0] != address(0), "StabilityPool: no troves");
@@ -852,6 +907,5 @@ contract StabilityPool is BaseMath, CheckContract, MultiAssetInitializable, Guar
     }
 
     receive() external payable {
-        _requireCallerIsActivePoolorCakeMiner();
     }
 }
